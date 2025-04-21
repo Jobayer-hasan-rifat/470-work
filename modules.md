@@ -41,46 +41,61 @@ c) Secure Transactions:
 - get_transaction_history(user_id)
 - rate_user(transaction_id, rating)
 
-Module 3: Notification & Reporting System (Upcoming)
+Module 3: Ride Share (Scrum Master - [Assign Name])
 
-a) System Notifications:
-- Admins send system-wide or targeted notifications (e.g., maintenance, updates).
-- Users receive notifications in-app and via email.
+a) Ride Offer & Request:
+- Users can offer rides or request rides within the university community.
+- Specify pickup, drop-off, date/time, number of seats, and contact info.
 
-b) Usage Reporting:
-- Generate reports on user activity, item postings, and transactions.
-- Admin dashboard for viewing trends and analytics.
+b) Ride Matching & Booking:
+- Search and filter available rides by route, date, or time.
+- Book a seat in an offered ride.
 
-**Planned Functions:**
-- send_notification(target_group, message)
-- schedule_notification(target_group, message, send_time)
-- mark_notification_as_read(notification_id, user_id)
-- generate_report(report_type, date_range)
-- get_user_activity(user_id)
-- get_trending_items()
+c) Ride Management:
+- Users can view, edit, or cancel their ride offers/requests.
+- Manage ride history and upcoming bookings.
 
-Module 4: Event and Content Moderation (Upcoming)
+d) In-App Communication:
+- Users can message ride providers/requesters for coordination.
+- Admins can send important ride-related notifications.
 
-a) Event Management:
-- Admins add, edit, approve, or delete student events.
-- Event details managed through admin panel.
-- Event reminders and notifications for participants.
+e) Admin Oversight:
+- Admins can monitor ride postings for safety and compliance.
+- Remove inappropriate or fraudulent ride offers/requests.
 
-b) Content Moderation:
-- Admins monitor product listings and flag/remove inappropriate content.
-- Reporting tools for users to flag issues.
-- Automated content scanning for policy violations.
+**Key Working Functions:**
+- offer_ride(user_id, ride_info)
+- request_ride(user_id, ride_request)
+- search_rides(query, filters)
+- book_ride(user_id, ride_id)
+- admin_remove_ride(ride_id)
 
-**Planned Functions:**
-- add_event(event_info)
-- edit_event(event_id, event_info)
-- approve_event(event_id)
-- flag_content(content_id, reason)
-- remove_content(content_id)
-- get_reports()
-- auto_scan_content()
+Module 4: Lost & Found (Scrum Master - [Assign Name])
 
----
+a) Lost Item Reporting:
+- Users can report lost items with details, location, and contact info.
+
+b) Found Item Reporting:
+- Users can post found items with description and pickup instructions.
+
+c) Item Matching & Claiming:
+- System matches lost and found items by keywords or category.
+- Users can claim found items by contacting the reporter.
+
+d) Notification & Updates:
+- Users receive notifications about possible matches or claim status.
+- Admins can broadcast important updates about lost/found items.
+
+e) Admin Verification & Management:
+- Admins verify and approve item claims to prevent misuse.
+- Admins can remove inappropriate or duplicate reports.
+
+**Key Working Functions:**
+- report_lost_item(user_id, item_info)
+- report_found_item(user_id, item_info)
+- match_items(lost_item_id, found_item_id)
+- claim_item(user_id, item_id)
+- admin_verify_claim(item_id)
 
 ## About Us
 

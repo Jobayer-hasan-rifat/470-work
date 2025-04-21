@@ -127,7 +127,7 @@ const UserProfile = () => {
   const fetchMarketplacePosts = async (userId) => {
     setLoadingPosts(true);
     try {
-      const response = await axios.get(`/api/marketplace/user-items/${userId}`);
+      const response = await axios.get(`/api/marketplace/items/user/${userId}`);
       setMarketplacePosts(response.data || []);
       setLoadingPosts(false);
     } catch (err) {
@@ -710,6 +710,23 @@ const UserProfile = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      {/* Back to Dashboard Button and Logged-in Student Name */}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Button
+          variant="outlined"
+          color="primary"
+          onClick={() => navigate('/')}
+          sx={{ mr: 2 }}
+        >
+          Back to Home
+        </Button>
+        {/* Show logged-in student name */}
+        {user && (
+          <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
+            Logged in as: {user.name}
+          </Typography>
+        )}
+      </Box>
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
           <CircularProgress />
@@ -1081,4 +1098,4 @@ const UserProfile = () => {
   );
 };
 
-export default UserProfile; 
+export default UserProfile;

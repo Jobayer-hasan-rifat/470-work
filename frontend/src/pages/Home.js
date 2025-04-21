@@ -162,11 +162,21 @@ const Home = () => {
               color="primary"
               size="large"
               startIcon={<PersonIcon />}
-              onClick={() => navigateTo('/login')}
+              onClick={() => {
+                const userData = localStorage.getItem('user');
+                if (isLoggedIn && userData) {
+                  navigateTo('/profile');
+                } else {
+                  navigateTo('/login');
+                }
+              }}
               className="animate-on-mount"
               sx={{ borderRadius: '20px', px: 3, py: 1.2, backgroundColor: '#1565c0' }}
             >
-              Student Login
+              {(() => {
+                const userData = localStorage.getItem('user');
+                return (isLoggedIn && userData) ? `Hi, ${JSON.parse(userData).name}` : 'Student Login';
+              })()}
             </Button>
             <Button
               variant="contained"

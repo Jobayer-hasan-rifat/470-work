@@ -26,6 +26,9 @@ import { Search as SearchIcon, Add as AddIcon, Close as CloseIcon } from '@mui/i
 import axios from 'axios';
 import '../AppBackgrounds.css';
 
+import MessageSeller from '../components/MessageSeller';
+import { useNavigate } from 'react-router-dom';
+
 const Marketplace = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -45,8 +48,100 @@ const Marketplace = () => {
     category: '',
     images: []
   });
+  const isLoggedIn = localStorage.getItem('token') !== null;
+  const userData = isLoggedIn ? JSON.parse(localStorage.getItem('user')) : null;
+  const userId = userData ? (userData._id || userData.id) : null;
+  const navigate = useNavigate();
+  // Dialog state for messaging and payment
+  const [messageDialog, setMessageDialog] = useState({ open: false, item: null, seller: null });
+  const [buyDialog, setBuyDialog] = useState({ open: false, item: null, seller: null });
+  const categories = ['Electronics', 'Books', 'Furniture', 'Clothing', 'Other'];
+  const conditions = ['New', 'Like New', 'Good', 'Fair', 'Poor'];
+
+  useEffect(() => {
+    fetchItems();
+    document.body.classList.add('marketplace-page');
+    return () => {
+      document.body.classList.remove('marketplace-page');
+    };
+  }, []);
+
+  const fetchItems = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get('http://localhost:5000/api/marketplace/items');
+      setItems(response.data);
+    } catch (err) {
+      setError('Failed to load items. Please try again later.');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearchChange = (event) => {
+    setSearchQuery(event.target.value);
+  };
+
+  const handleFilterChange = (name, value) => {
+    setFilters({
+      ...filters,
+      [name]: value
+    });
+  };
+
+  const handlePriceRangeChange = (type, value) => {
+    setFilters({
+      ...filters,
+      priceRange: {
+        ...filters.priceRange,
+        [type]: value
+      }
+    });
+  };
+
+  const handleNewItemChange = (e) => {
+    const { name, value } = e.target;
+    setNewItem({
+      ...newItem,
+      [name]: value
+    });
+  };
+
+  const handleAddItem = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const formData = new FormData();
+      formData.append('title', newItem.title);
+      formData.append('description', newItem.description);
+      formData.append('price', newItem.price);
+      formData.append('condition', newItem.condition);
+      formData.append('category', newItem.category);
+  const [error, setError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filters, setFilters] = useState({
+    category: '',
+    condition: '',
+    priceRange: { min: '', max: '' }
+  });
+  const [openAddDialog, setOpenAddDialog] = useState(false);
+  const [newItem, setNewItem] = useState({
+    title: '',
+    description: '',
+    price: '',
+    condition: '',
+    category: '',
+    images: []
+  });
   
   const isLoggedIn = localStorage.getItem('token') !== null;
+  const userData = isLoggedIn ? JSON.parse(localStorage.getItem('user')) : null;
+  const userId = userData ? (userData._id || userData.id) : null;
+  const navigate = useNavigate();
+
+  // Dialog state for messaging and payment
+  const [messageDialog, setMessageDialog] = useState({ open: false, item: null, seller: null });
+  const [buyDialog, setBuyDialog] = useState({ open: false, item: null, seller: null });
   
   const categories = ['Electronics', 'Books', 'Furniture', 'Clothing', 'Other'];
   const conditions = ['New', 'Like New', 'Good', 'Fair', 'Poor'];
@@ -104,12 +199,24 @@ const Marketplace = () => {
   const handleAddItem = async () => {
     try {
       const token = localStorage.getItem('token');
+      const formData = new FormData();
+      formData.append('title', newItem.title);
+      formData.append('description', newItem.description);
+      formData.append('price', newItem.price);
+      formData.append('condition', newItem.condition);
+      formData.append('category', newItem.category);
+      if (newItem.images && newItem.images.length > 0) {
+        Array.from(newItem.images).slice(0, 3).forEach((file, idx) => {
+          formData.append('images', file);
+        });
+      }
       await axios.post(
-        'http://localhost:5000/api/marketplace/items', 
-        newItem, 
+        'http://localhost:5000/api/marketplace/items',
+        formData,
         {
           headers: {
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data'
           }
         }
       );
@@ -129,6 +236,7 @@ const Marketplace = () => {
       console.error('Error adding item:', err);
     }
   };
+
 
   const filteredItems = items.filter(item => {
     // Search query filter
@@ -150,6 +258,7 @@ const Marketplace = () => {
   });
 
   return (
+  <>
     <Container>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" component="h1">
@@ -237,48 +346,112 @@ const Marketplace = () => {
       </Grid>
       
       {loading ? (
-        <Typography>Loading items...</Typography>
-      ) : error ? (
-        <Typography color="error">{error}</Typography>
-      ) : filteredItems.length === 0 ? (
-        <Typography>No items found matching your filters.</Typography>
-      ) : (
-        <Grid container spacing={3}>
-          {filteredItems.map((item) => (
-            <Grid item key={item._id} xs={12} sm={6} md={4}>
-              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <CardMedia
-                  component="img"
-                  height="140"
-                  image={item.images?.[0] || "https://via.placeholder.com/300x200?text=No+Image"}
-                  alt={item.title}
-                />
-                <CardContent sx={{ flexGrow: 1 }}>
-                  <Typography gutterBottom variant="h6" component="div">
-                    {item.title}
-                  </Typography>
-                  <Typography variant="h6" color="primary" gutterBottom>
-                    ${item.price}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                    <Chip label={item.category} size="small" />
-                    <Chip label={item.condition} size="small" variant="outlined" />
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {item.description.length > 100 
-                      ? `${item.description.substring(0, 100)}...` 
-                      : item.description}
-                  </Typography>
-                  <Button size="small" variant="outlined">View Details</Button>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
-      )}
-      
-      {/* Add Item Dialog */}
-      <Dialog open={openAddDialog} onClose={() => setOpenAddDialog(false)} maxWidth="sm" fullWidth>
+  <Typography>Loading items...</Typography>
+) : error ? (
+  <Typography color="error">{error}</Typography>
+) : filteredItems.length === 0 ? (
+  <Typography>No items found matching your filters.</Typography>
+) : (
+  <Grid container spacing={3}>
+    {filteredItems.map((item) => (
+      <Grid item key={item._id} xs={12} sm={6} md={4}>
+        <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <CardMedia
+            component="img"
+            height="140"
+            image={item.images?.[0] || "https://via.placeholder.com/300x200?text=No+Image"}
+            alt={item.title}
+          />
+          <CardContent sx={{ flexGrow: 1 }}>
+            <Typography gutterBottom variant="h6" component="div">
+              {item.title}
+            </Typography>
+            <Typography variant="h6" color="primary" gutterBottom>
+              ${item.price}
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+              <Chip label={item.category} size="small" />
+              <Chip label={item.condition} size="small" variant="outlined" />
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              {item.description.length > 100
+                ? `${item.description.substring(0, 100)}...`
+                : item.description}
+            </Typography>
+            {/* Owner actions */}
+            {userId && item.user_id === userId ? (
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button size="small" variant="outlined" sx={{ mr: 1 }}>
+                  View
+                </Button>
+                <Button size="small" variant="contained" color="primary" sx={{ mr: 1 }}>
+                  Edit
+                </Button>
+                <Button size="small" variant="contained" color="error">
+                  Delete
+                </Button>
+              </Box>
+            ) : (
+              // Buyer actions
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button size="small" variant="outlined" sx={{ mr: 1 }} onClick={() => setMessageDialog({ open: true, item, seller: item.user || { name: 'Seller', email: '' } })}>
+                  Message Seller
+                </Button>
+                <Button size="small" variant="contained" color="success" sx={{ mr: 1 }} onClick={() => navigate('/payment', { state: { item, seller: item.user || { name: 'Seller', email: '' } } })}>
+                  Buy
+                </Button>
+                <Button size="small" variant="outlined">
+                  View Product
+                </Button>
+              </Box>
+            )}
+          </CardContent>
+        </Card>
+      </Grid>
+    ))}
+  </Grid>
+  )}
+        </Container>
+      );
+
+  <Grid item xs={6} md={2}>
+    <FormControl fullWidth>
+      <InputLabel id="condition-label">Condition</InputLabel>
+      <Select
+        labelId="condition-label"
+        id="condition"
+        value={filters.condition}
+        label="Condition"
+        onChange={(e) => handleFilterChange('condition', e.target.value)}
+      >
+        <MenuItem value="">All</MenuItem>
+        {conditions.map(condition => (
+          <MenuItem key={condition} value={condition}>{condition}</MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  </Grid>
+  <Grid item xs={6} md={2}>
+    <TextField
+      fullWidth
+      label="Min Price"
+      type="number"
+      value={filters.priceRange.min}
+      onChange={(e) => handlePriceRangeChange('min', e.target.value)}
+    />
+  </Grid>
+  <Grid item xs={6} md={2}>
+    <TextField
+      fullWidth
+      label="Max Price"
+      type="number"
+      value={filters.priceRange.max}
+      onChange={(e) => handlePriceRangeChange('max', e.target.value)}
+    />
+  </Grid>
+</Grid>
+{/* Add Item Dialog */}
+<Dialog open={openAddDialog} onClose={() => setOpenAddDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
           Add New Item
           <IconButton
@@ -358,32 +531,46 @@ const Marketplace = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Image URL"
-                name="image"
-                placeholder="Enter image URL"
-                onBlur={(e) => {
-                  if (e.target.value) {
-                    setNewItem({
-                      ...newItem,
-                      images: [...newItem.images, e.target.value]
-                    });
-                    e.target.value = '';
-                  }
+              <Typography variant="subtitle1" sx={{ mb: 1 }}>Upload up to 3 Photos</Typography>
+              <input
+                accept="image/*"
+                type="file"
+                multiple
+                style={{ display: 'none' }}
+                id="marketplace-image-upload"
+                onChange={e => {
+                  const files = Array.from(e.target.files).slice(0, 3);
+                  setNewItem({
+                    ...newItem,
+                    images: files
+                  });
                 }}
               />
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                {newItem.images.map((url, index) => (
-                  <Chip 
-                    key={index} 
-                    label={`Image ${index + 1}`} 
-                    onDelete={() => {
-                      const updatedImages = [...newItem.images];
-                      updatedImages.splice(index, 1);
-                      setNewItem({...newItem, images: updatedImages});
-                    }}
-                  />
+              <label htmlFor="marketplace-image-upload">
+                <Button variant="outlined" component="span">
+                  Upload Photos
+                </Button>
+              </label>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mt: 2 }}>
+                {newItem.images && Array.from(newItem.images).map((file, idx) => (
+                  <Box key={idx} sx={{ position: 'relative' }}>
+                    <img
+                      src={typeof file === 'string' ? file : URL.createObjectURL(file)}
+                      alt={`Preview ${idx + 1}`}
+                      style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 4, border: '1px solid #ccc' }}
+                    />
+                    <IconButton
+                      size="small"
+                      sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'white' }}
+                      onClick={() => {
+                        const updated = Array.from(newItem.images);
+                        updated.splice(idx, 1);
+                        setNewItem({ ...newItem, images: updated });
+                      }}
+                    >
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
                 ))}
               </Box>
             </Grid>
@@ -394,8 +581,20 @@ const Marketplace = () => {
           <Button variant="contained" onClick={handleAddItem}>Add Item</Button>
         </DialogActions>
       </Dialog>
-    </Container>
-  );
-};
+    {/* Message Seller Dialog */}
+    {messageDialog.open && (
+      <Dialog open={true} onClose={() => setMessageDialog({ open: false, item: null, seller: null })}>
+        <DialogTitle>Contact Seller</DialogTitle>
+        <DialogContent>
+          <MessageSeller 
+            item={messageDialog.item} 
+            seller={messageDialog.seller} 
+            onClose={() => setMessageDialog({ open: false, item: null, seller: null })}
+          />
+        </DialogContent>
+      </Dialog>
+    )}
+  </Container>
+);
 
-export default Marketplace; 
+export default Marketplace;

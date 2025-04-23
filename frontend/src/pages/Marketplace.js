@@ -24,7 +24,8 @@ import {
   Snackbar,
   Alert
 } from '@mui/material';
-import { Search as SearchIcon, Add as AddIcon, Close as CloseIcon } from '@mui/icons-material';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
 import axios from 'axios';
 import '../AppBackgrounds.css';
 
@@ -197,21 +198,76 @@ const Marketplace = () => {
     return matchesSearch && matchesCategory && matchesCondition && matchesMinPrice && matchesMaxPrice;
   });
 
+  if (loading) return (
+    <Container>
+      <Box sx={{ py: 4 }}>
+        <Typography>Loading...</Typography>
+      </Box>
+    </Container>
+  );
+
+  if (error) return (
+    <Container>
+      <Box sx={{ py: 4 }}>
+        <Typography color="error">{error}</Typography>
+      </Box>
+    </Container>
+  );
+
   return (
     <Container>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" component="h1">
+      <Box sx={{ py: 4 }}>
+        <Typography variant="h4" gutterBottom>
           Marketplace
         </Typography>
-        {isLoggedIn && (
-          <Button 
-            variant="contained" 
-            startIcon={<AddIcon />}
-            onClick={() => setOpenAddDialog(true)}
-          >
-            Add Item
-          </Button>
-        )}
+
+        <TextField
+          fullWidth
+          placeholder="Search items..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          sx={{ mb: 4 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon />
+              </InputAdornment>
+            ),
+          }}
+        />
+
+        <Grid container spacing={3}>
+          {filteredItems.map((item) => (
+            <Grid item xs={12} sm={6} md={4} key={item._id}>
+              <Card>
+                <CardMedia
+                  component="img"
+                  height="200"
+                  image={item.images?.[0] || 'https://via.placeholder.com/200'}
+                  alt={item.title}
+                />
+                <CardContent>
+                  <Typography gutterBottom variant="h6">
+                    {item.title}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" gutterBottom>
+                    ${item.price}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {item.description}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+          {filteredItems.length === 0 && (
+            <Grid item xs={12}>
+              <Typography align="center" color="text.secondary">
+                No items found
+              </Typography>
+            </Grid>
+          )}
+        </Grid>
       </Box>
       
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -477,3 +533,4 @@ const Marketplace = () => {
 };
 
 export default Marketplace; 
+

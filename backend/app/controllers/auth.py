@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, url_for, render_template_string
 from pymongo import MongoClient
 from ..models.user import User
 import os
@@ -11,11 +11,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from bson.objectid import ObjectId
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 auth_bp = Blueprint('auth_bp', __name__)
-client = MongoClient(os.environ.get('MONGODB_URI', 'mongodb://localhost:27017/'))
-db = client.bracu_circle
-user_model = User(db)
+# Use the application's mongo_client instead of creating a new connection
+user_model = User(None)  # Will be initialized properly when used with the correct database
 
 # Secret key for JWT
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key')
@@ -26,6 +28,13 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
+# Email configuration
+EMAIL_SERVER = os.environ.get('EMAIL_SERVER', 'smtp.gmail.com')
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', 587))
+EMAIL_USERNAME = os.environ.get('EMAIL_USERNAME', 'your-email@gmail.com')
+EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD', 'your-app-password')
+EMAIL_SENDER = os.environ.get('EMAIL_SENDER', 'BRACU Circle <your-email@gmail.com>')
+
 # Create a limiter instance
 limiter = Limiter(
     key_func=get_remote_address,
@@ -33,9 +42,73 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
+# HTML template for password reset email
+PASSWORD_RESET_EMAIL_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #4285f4; color: white; padding: 10px 20px; text-align: center; }
+        .content { padding: 20px; border: 1px solid #ddd; }
+        .button { display: inline-block; background-color: #4285f4; color: white; text-decoration: none; padding: 10px 20px; border-radius: 4px; }
+        .footer { margin-top: 20px; font-size: 12px; color: #777; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>BRACU Circle Password Reset</h2>
+        </div>
+        <div class="content">
+            <p>Hello {{name}},</p>
+            <p>We received a request to reset your password for your BRACU Circle account. If you didn't make this request, you can ignore this email.</p>
+            <p>To reset your password, click the button below. This link will expire in 1 hour.</p>
+            <p style="text-align: center;">
+                <a href="{{reset_link}}" class="button">Reset Password</a>
+            </p>
+            <p>Or copy and paste this link into your browser:</p>
+            <p>{{reset_link}}</p>
+            <p>Thank you,<br>The BRACU Circle Team</p>
+        </div>
+        <div class="footer">
+            <p>This is an automated email. Please do not reply to this message.</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def send_email(to_email, subject, html_content):
+    """Send an email using SMTP"""
+    try:
+        # Create message container
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_SENDER
+        msg['To'] = to_email
+        
+        # Attach HTML content
+        part = MIMEText(html_content, 'html')
+        msg.attach(part)
+        
+        # Connect to server and send
+        server = smtplib.SMTP(EMAIL_SERVER, EMAIL_PORT)
+        server.starttls()
+        server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
+        server.sendmail(EMAIL_SENDER, to_email, msg.as_string())
+        server.quit()
+        
+        current_app.logger.info(f"Password reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        current_app.logger.error(f"Failed to send email: {str(e)}")
+        return False
 
 @auth_bp.route('/register', methods=['POST'])
 @limiter.limit("20 per hour")  # Limit registration attempts
@@ -188,6 +261,118 @@ def login():
         current_app.logger.error(f"Login error: {str(e)}")
         return jsonify({"error": "An error occurred during login. Please try again."}), 500
 
+@auth_bp.route('/forgot-password', methods=['POST'])
+@limiter.limit("5 per hour")  # Limit password reset requests
+def forgot_password():
+    try:
+        data = request.get_json()
+        
+        # Check if email is provided
+        if not data or 'email' not in data:
+            return jsonify({"error": "Email is required"}), 400
+            
+        email = data['email'].strip()
+        
+        # Validate email format (must be name@g.bracu.ac.bd)
+        if not email.endswith('@g.bracu.ac.bd'):
+            return jsonify({'error': 'Email must be in the format name@g.bracu.ac.bd'}), 400
+        
+        # Generate reset token
+        reset_info = user_model.create_password_reset_token(email)
+        if not reset_info:
+            # Don't reveal if email exists or not for security reasons
+            return jsonify({"message": "If your email is registered, you will receive password reset instructions"}), 200
+        
+        # Create reset link
+        # In a real-world scenario, this would be a frontend URL
+        frontend_url = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
+        reset_link = f"{frontend_url}/reset-password?token={reset_info['token']}"
+        
+        # Log the reset link for development purposes
+        current_app.logger.info(f"Password reset link for {email}: {reset_link}")
+        
+        # For development: Return the token directly instead of sending an email
+        # In production, you would want to actually send the email
+        try:
+            # Prepare email content
+            email_content = render_template_string(
+                PASSWORD_RESET_EMAIL_TEMPLATE,
+                name=reset_info['name'],
+                reset_link=reset_link
+            )
+            
+            # Try to send email, but don't fail if it doesn't work
+            send_email(
+                to_email=email,
+                subject="BRACU Circle - Password Reset",
+                html_content=email_content
+            )
+        except Exception as e:
+            current_app.logger.error(f"Email sending failed but continuing: {str(e)}")
+        
+        # Return success with token for development
+        return jsonify({
+            "message": "Password reset instructions have been sent.",
+            "dev_info": {
+                "reset_link": reset_link,
+                "token": reset_info['token'],
+                "expires": reset_info['expiry'].isoformat()
+            }
+        }), 200
+    except Exception as e:
+        current_app.logger.error(f"Forgot password error: {str(e)}")
+        return jsonify({"error": "An error occurred. Please try again later."}), 500
+
+@auth_bp.route('/verify-reset-token', methods=['POST'])
+def verify_reset_token():
+    try:
+        data = request.get_json()
+        
+        # Check if token is provided
+        if not data or 'token' not in data:
+            return jsonify({"error": "Reset token is required"}), 400
+            
+        token = data['token']
+        
+        # Verify token
+        user_info = user_model.verify_reset_token(token)
+        if not user_info:
+            return jsonify({"error": "Invalid or expired reset token"}), 400
+            
+        return jsonify({"valid": True, "email": user_info['email']}), 200
+    except Exception as e:
+        current_app.logger.error(f"Verify reset token error: {str(e)}")
+        return jsonify({"error": "An error occurred. Please try again later."}), 500
+
+@auth_bp.route('/reset-password', methods=['POST'])
+def reset_password():
+    try:
+        data = request.get_json()
+        
+        # Check if required fields are provided
+        if not data or 'token' not in data or 'password' not in data:
+            return jsonify({"error": "Reset token and new password are required"}), 400
+            
+        token = data['token']
+        password = data['password']
+        
+        # Validate password strength
+        if (not any(c.isupper() for c in password) or
+            not any(c.islower() for c in password) or
+            not any(c.isdigit() for c in password) or
+            not any(c in '!@#$%^&*()_+-=[]{};\'"\\|,.<>/?' for c in password)):
+            return jsonify({'error': 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'}), 400
+        
+        # Reset password
+        success = user_model.reset_password(token, password)
+        if not success:
+            return jsonify({"error": "Invalid or expired reset token"}), 400
+            
+        return jsonify({"message": "Password has been reset successfully. You can now log in with your new password."}), 200
+    except Exception as e:
+        current_app.logger.error(f"Reset password error: {str(e)}")
+        return jsonify({"error": "An error occurred. Please try again later."}), 500
+
 @auth_bp.route('/admin/login', methods=['POST'])
 @limiter.limit("5 per minute")  # Very strict limit for admin login attempts
 def admin_login():
@@ -198,24 +383,50 @@ def admin_login():
         if not data or 'email' not in data or 'password' not in data:
             return jsonify({"error": "Email and password are required"}), 400
         
-        # Hardcoded admin credentials (in a real app, these would be in the database)
-        # Never use hardcoded credentials in production
         email = data['email'].strip()
         password = data['password']
+
+        # First check hardcoded admin credentials
+        if email == "470@gmail.com" and password == "bracu2025":
+            # Generate admin JWT token
+            access_token = create_access_token(
+                identity="admin",
+                additional_claims={"role": "admin"},
+                expires_delta=timedelta(days=1)
+            )
+            
+            return jsonify({
+                'admin': {
+                    'email': '470@gmail.com',
+                    'role': 'admin'
+                },
+                'access_token': access_token
+            }), 200
+
+        # If not hardcoded admin, check database
+        client = current_app.mongo_client
+        db = client.get_database()
+        users_collection = db.users
         
-        if email != '470@gmail.com' or password != 'bracu2025':
+        admin_user = users_collection.find_one({
+            "email": email,
+            "role": "admin"
+        })
+        
+        if not admin_user or not check_password_hash(admin_user['password'], password):
             return jsonify({"error": "Invalid admin credentials"}), 401
         
-        # Generate admin JWT token with admin role using flask_jwt_extended
+        # Generate admin JWT token with admin role and user ID
         access_token = create_access_token(
-            identity="admin",  # We're using a string identifier here
+            identity=str(admin_user['_id']),
             additional_claims={"role": "admin"},
             expires_delta=timedelta(days=1)
         )
         
         return jsonify({
             'admin': {
-                'email': '470@gmail.com',
+                'id': str(admin_user['_id']),
+                'email': admin_user['email'],
                 'role': 'admin'
             },
             'access_token': access_token

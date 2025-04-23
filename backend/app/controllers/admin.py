@@ -133,7 +133,7 @@ def get_verified_users():
         current_app.logger.error(f"Error getting verified users: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@admin_bp.route('/approve-user/<user_id>', methods=['POST'])
+@admin_bp.route('/approve-user/<user_id>', methods=['PUT'])
 @jwt_required()
 @admin_required
 def approve_user(user_id):
@@ -167,7 +167,7 @@ def approve_user(user_id):
         current_app.logger.error(f"Error approving user: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@admin_bp.route('/reject-user/<user_id>', methods=['POST'])
+@admin_bp.route('/reject-user/<user_id>', methods=['PUT'])
 @jwt_required()
 @admin_required
 def reject_user(user_id):

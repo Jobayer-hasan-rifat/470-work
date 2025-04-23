@@ -25,7 +25,8 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  TextField
+  TextField,
+  Snackbar
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import GroupIcon from '@mui/icons-material/Group';
@@ -34,12 +35,13 @@ import DoneAllIcon from '@mui/icons-material/DoneAll';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 import StoreIcon from '@mui/icons-material/Store';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import HomeIcon from '@mui/icons-material/Home';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import MenuIcon from '@mui/icons-material/Menu';
 import axios from 'axios';
 import '../AppBackgrounds.css';
 import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDrawer';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 
 // Drawer width for the sidebar
 const drawerWidth = 240;
@@ -49,6 +51,7 @@ const AdminDashboard = () => {
   const [editUserData, setEditUserData] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   // Handler to close edit drawer/modal
   const handleEditUser = (user) => {
@@ -63,9 +66,13 @@ const AdminDashboard = () => {
   };
 
   // Handler to open delete confirmation dialog
-  const handleDeleteUser = (user) => {
-    setUserToDelete(user);
+  const handleDeleteVerifiedUser = (userId) => {
+    // Find the user to delete
+    const userToDelete = verifiedUsers.find(user => user._id === userId);
+    if (userToDelete) {
+      setUserToDelete(userToDelete);
     setDeleteConfirmOpen(true);
+    }
   };
 
   // Handler to close delete confirmation dialog
@@ -81,13 +88,39 @@ const AdminDashboard = () => {
     try {
       const adminToken = localStorage.getItem('adminToken');
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-      await axios.delete(`/api/admin/delete-user/${userToDelete._id}`);
-      setError('');
+      const response = await axios.delete(`/api/admin/delete-user/${userToDelete._id}`);
+      
+      // Set success message with snackbar
+      setSnackbar({
+        open: true,
+        message: response.data.message || 'User deleted successfully',
+        severity: 'success'
+      });
+      
+      // Immediately update the verified users list
+      setVerifiedUsers(prevUsers => prevUsers.filter(user => user._id !== userToDelete._id));
+      
+      // Update user counts in statistics
+      setStats(prevStats => ({
+        ...prevStats,
+        users: {
+          ...prevStats.users,
+          total: prevStats.users.total - 1,
+          verified: prevStats.users.verified - 1
+        }
+      }));
+      
       setDeleteConfirmOpen(false);
       setUserToDelete(null);
-      await fetchDashboardData();
     } catch (err) {
-      setError(`Failed to delete user: ${err.response?.data?.error || err.message}`);
+      // Set error message with snackbar
+      setSnackbar({
+        open: true,
+        message: `Failed to delete user: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
+      // Still refresh data to ensure UI is in sync with backend
+      await fetchDashboardData(false);
     } finally {
       setActionLoading(false);
     }
@@ -99,14 +132,41 @@ const AdminDashboard = () => {
     setActionLoading(true);
     try {
       const adminToken = localStorage.getItem('adminToken');
+      const adminInfo = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfo) {
+        throw new Error('Admin authentication required');
+      }
+      
+      // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
+      
       await axios.put(`/api/admin/edit-user/${editUserData._id}`, editUserData);
-      setError('');
+      
+      // Set success message with snackbar
+      setSnackbar({
+        open: true,
+        message: 'User updated successfully',
+        severity: 'success'
+      });
+      
       setEditUserOpen(false);
       setEditUserData(null);
+      // Immediately update the verified users list
+      setVerifiedUsers(prevUsers => 
+        prevUsers.map(user => 
+          user._id === editUserData._id ? { ...user, ...editUserData } : user
+        )
+      );
+      // Refresh all data to ensure consistency
       await fetchDashboardData();
     } catch (err) {
-      setError(`Failed to edit user: ${err.response?.data?.error || err.message}`);
+      // Set error message with snackbar
+      setSnackbar({
+        open: true,
+        message: `Failed to edit user: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
     } finally {
       setActionLoading(false);
     }
@@ -120,13 +180,40 @@ const AdminDashboard = () => {
   const fetchMarketplaceData = async () => {
     try {
       setLoading(true);
-      setError('');
       const adminToken = localStorage.getItem('adminToken');
+      const adminInfoStr = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfoStr) {
+        throw new Error('Admin authentication required');
+      }
+      
+      // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-      const response = await axios.get('/api/marketplace/items');
+      
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/marketplace/items?_=${timestamp}`);
       setMarketplaceItems(response.data || []);
+      
+      // Update stats with the new marketplace data
+      setStats(prev => ({
+        ...prev,
+        marketplace: {
+          ...prev.marketplace,
+          total_items: response.data?.length || 0
+        },
+        recent_activities: {
+          ...prev.recent_activities,
+          items: response.data?.slice(0, 5) || []
+        }
+      }));
     } catch (err) {
-      setError('Failed to fetch marketplace items.');
+      console.error('Error fetching marketplace items:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to fetch marketplace items.',
+        severity: 'error'
+      });
       setMarketplaceItems([]);
     } finally {
       setLoading(false);
@@ -164,13 +251,47 @@ const AdminDashboard = () => {
     setMarketplaceActionLoading(editMarketplaceData._id);
     try {
       const adminToken = localStorage.getItem('adminToken');
+      const adminInfoStr = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfoStr) {
+        throw new Error('Admin authentication required');
+      }
+      
+      // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
+      
       await axios.put(`/api/marketplace/items/${editMarketplaceData._id}`, editMarketplaceData);
       setEditMarketplaceOpen(false);
       setEditMarketplaceData(null);
+      
+      // Immediately update the UI
+      setMarketplaceItems(prevItems =>
+        prevItems.map(item =>
+          item._id === editMarketplaceData._id ? { ...item, ...editMarketplaceData } : item
+        )
+      );
+      
+      // Update recent activities if needed
+      setStats(prev => ({
+        ...prev,
+        recent_activities: {
+          ...prev.recent_activities,
+          items: prev.recent_activities.items.map(item =>
+            item._id === editMarketplaceData._id ? { ...item, ...editMarketplaceData } : item
+          )
+        }
+      }));
+      
+      // Refresh all data to ensure consistency
       await fetchMarketplaceData();
+      await fetchDashboardData();
     } catch (err) {
-      setError(`Failed to edit item: ${err.response?.data?.error || err.message}`);
+      console.error('Error editing marketplace item:', err);
+      setSnackbar({
+        open: true,
+        message: `Failed to edit item: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
     } finally {
       setMarketplaceActionLoading('');
     }
@@ -188,13 +309,45 @@ const AdminDashboard = () => {
     setMarketplaceActionLoading(marketplaceToDelete._id);
     try {
       const adminToken = localStorage.getItem('adminToken');
+      const adminInfoStr = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfoStr) {
+        throw new Error('Admin authentication required');
+      }
+      
+      // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
+      
       await axios.delete(`/api/marketplace/items/${marketplaceToDelete._id}`);
       setDeleteMarketplaceOpen(false);
       setMarketplaceToDelete(null);
+      
+      // Immediately update the UI
+      setMarketplaceItems(prevItems => prevItems.filter(item => item._id !== marketplaceToDelete._id));
+      
+      // Update stats
+      setStats(prev => ({
+        ...prev,
+        marketplace: {
+          ...prev.marketplace,
+          total_items: (prev.marketplace?.total_items || 0) - 1
+        },
+        recent_activities: {
+          ...prev.recent_activities,
+          items: prev.recent_activities.items.filter(item => item._id !== marketplaceToDelete._id)
+        }
+      }));
+      
+      // Refresh all data to ensure consistency
       await fetchMarketplaceData();
+      await fetchDashboardData();
     } catch (err) {
-      setError(`Failed to delete item: ${err.response?.data?.error || err.message}`);
+      console.error('Error deleting marketplace item:', err);
+      setSnackbar({
+        open: true,
+        message: `Failed to delete item: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
     } finally {
       setMarketplaceActionLoading('');
     }
@@ -203,7 +356,6 @@ const AdminDashboard = () => {
 
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [stats, setStats] = useState(null);
   const [pendingUsers, setPendingUsers] = useState([]);
   const [verifiedUsers, setVerifiedUsers] = useState([]);
@@ -230,7 +382,7 @@ const AdminDashboard = () => {
     
     if (!adminToken) {
       console.log("No admin token found, redirecting to login");
-      navigate('/admin-login');
+      navigate('/admin/login');
       return;
     }
 
@@ -250,147 +402,314 @@ const AdminDashboard = () => {
     fetchDashboardData()
       .then(() => {
         setTokenVerified(true);
+        
+        // Set up polling to check for updates every 10 seconds
+        const intervalId = setInterval(() => {
+          fetchDashboardData(false); // Pass false to avoid showing loading state
+        }, 10000);
+        
+        // Store the interval ID in a ref so we can clear it on unmount
+        return () => clearInterval(intervalId);
       })
       .catch(err => {
         console.error("Dashboard data fetch failed, likely an auth issue:", err);
         if (err.response?.status === 401 || err.response?.status === 403) {
           localStorage.removeItem('adminToken');
           localStorage.removeItem('adminInfo');
-          navigate('/admin-login');
+          navigate('/admin/login');
         } else if (err.response?.status === 429) {
           // Rate limit error
-          setError("Rate limit exceeded. Please wait a moment and try again.");
-          setTimeout(() => {
-            window.location.reload();
-          }, 5000); // Wait 5 seconds and reload
+          setSnackbar({
+            open: true,
+            message: "Rate limit exceeded. Please wait a moment and try again.",
+            severity: 'error'
+          });
+          return false;
         }
       });
+      
+    // Clean up function to clear any intervals when component unmounts
+    return () => {
+      // This will be replaced by the actual cleanup function when the promise resolves
+      console.log("AdminDashboard unmounting...");
+    };
   }, [navigate, tokenVerified]);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  const fetchDashboardData = async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+    }
     try {
       console.log("Fetching admin dashboard data...");
       
       // Create default empty stats in case of failure
       const defaultStats = {
         users: { total: 0, verified: 0, pending: 0 },
-        rooms: { total: 0 },
         marketplace: { total_items: 0 },
-        recent_activities: { bookings: [], items: [] }
+        recent_activities: { items: [] }
       };
       
       try {
-        // Get statistics
+        // Add timestamp to requests to prevent caching
+        const timestamp = new Date().getTime();
+        
+        // Get statistics with cache busting
         console.log("Fetching statistics...");
-        const statsResponse = await axios.get('/api/admin/statistics');
+        const statsResponse = await axios.get(`/api/admin/statistics?_=${timestamp}`);
         console.log("Statistics response:", statsResponse.data);
-        setStats(statsResponse.data);
+        
+        // Get marketplace items count with cache busting
+        const marketplaceResponse = await axios.get(`/api/marketplace/items?_=${timestamp}`);
+        const marketplaceItemsCount = marketplaceResponse.data?.length || 0;
+        
+        // Combine stats with real-time marketplace count
+        const combinedStats = {
+          ...statsResponse.data,
+          marketplace: {
+            total_items: marketplaceItemsCount
+          },
+          recent_activities: {
+            items: marketplaceResponse.data?.slice(0, 5) || [] // Show only 5 most recent items
+          }
+        };
+        
+        setStats(combinedStats);
+        setMarketplaceItems(marketplaceResponse.data || []);
       } catch (statsErr) {
         console.error("Error fetching statistics:", statsErr);
         setStats(defaultStats);
-        
-        setError(`Failed to load dashboard data: ${statsErr.response?.data?.error || statsErr.message}`);
+        setSnackbar({
+          open: true,
+          message: `Failed to load dashboard data: ${statsErr.response?.data?.error || statsErr.message}`,
+          severity: 'error'
+        });
       }
 
       try {
+        // Add timestamp to prevent caching
+        const pendingTimestamp = new Date().getTime();
+        
         // Get pending users
         console.log("Fetching pending users...");
-        const pendingResponse = await axios.get('/api/admin/pending-users');
+        const pendingResponse = await axios.get(`/api/admin/pending-users?_=${pendingTimestamp}`);
         console.log("Pending users response:", pendingResponse.data);
-        setPendingUsers(pendingResponse.data || []);
+        
+        // Check if there are new pending users that weren't in our list before
+        const newPendingUsers = pendingResponse.data || [];
+        const currentPendingIds = pendingUsers.map(user => user._id);
+        const hasNewPendingUsers = newPendingUsers.some(user => !currentPendingIds.includes(user._id));
+        
+        if (hasNewPendingUsers && pendingUsers.length > 0) {
+          setSnackbar({
+            open: true,
+            message: 'New registration requests received!',
+            severity: 'info'
+          });
+        }
+        
+        setPendingUsers(newPendingUsers);
+        
+        // Update stats with real pending count
+        setStats(prev => ({
+          ...prev,
+          users: {
+            ...prev.users,
+            pending: newPendingUsers.length || 0
+          }
+        }));
       } catch (pendingErr) {
         console.error("Error fetching pending users:", pendingErr);
         setPendingUsers([]);
-        
-        setError(`Failed to load dashboard data: ${pendingErr.response?.data?.error || pendingErr.message}`);
+        setSnackbar({
+          open: true,
+          message: `Failed to load pending users: ${pendingErr.response?.data?.error || pendingErr.message}`,
+          severity: 'error'
+        });
       }
 
       try {
+        // Add timestamp to prevent caching
+        const verifiedTimestamp = new Date().getTime();
+        
         // Get verified users
         console.log("Fetching verified users...");
-        const verifiedResponse = await axios.get('/api/admin/verified-users');
+        const verifiedResponse = await axios.get(`/api/admin/verified-users?_=${verifiedTimestamp}`);
         console.log("Verified users response:", verifiedResponse.data);
-        setVerifiedUsers(verifiedResponse.data || []);
+        
+        // Check if there are changes in the verified users list
+        const newVerifiedUsers = verifiedResponse.data || [];
+        const currentVerifiedIds = verifiedUsers.map(user => user._id);
+        
+        // Find users that are in our current list but not in the new list (deleted users)
+        const deletedUsers = verifiedUsers.filter(user => 
+          !newVerifiedUsers.some(newUser => newUser._id === user._id)
+        );
+        
+        if (deletedUsers.length > 0 && verifiedUsers.length > 0) {
+          // This means some users were deleted from the database but still showing in our UI
+          // We'll update the UI to match the database
+          console.log('Detected deleted users that were still in UI:', deletedUsers);
+        }
+        
+        setVerifiedUsers(newVerifiedUsers);
+        
+        // Update stats with real verified count
+        setStats(prev => ({
+          ...prev,
+          users: {
+            ...prev.users,
+            verified: newVerifiedUsers.length || 0,
+            total: (newVerifiedUsers.length || 0) + (prev.users.pending || 0)
+          }
+        }));
       } catch (verifiedErr) {
         console.error("Error fetching verified users:", verifiedErr);
         setVerifiedUsers([]);
-        
-        setError(`Failed to load dashboard data: ${verifiedErr.response?.data?.error || verifiedErr.message}`);
+        setSnackbar({
+          open: true,
+          message: `Failed to load verified users: ${verifiedErr.response?.data?.error || verifiedErr.message}`,
+          severity: 'error'
+        });
       }
       
-      setError('');
       return true;
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
-      
-      setError(`Failed to load dashboard data: ${err.response?.data?.error || err.message}`);
+      setSnackbar({
+        open: true,
+        message: `Failed to load dashboard data: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
   const handleApproveUser = async (userId) => {
-    setActionLoading(true);
+    setActionLoading(userId);
     try {
-      console.log(`Approving user with ID: ${userId}`);
-      
       const adminToken = localStorage.getItem('adminToken');
-      if (!adminToken) {
-        throw new Error('No admin token found');
+      const adminInfoStr = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfoStr) {
+        throw new Error('Admin authentication required');
       }
       
-      // Ensure the authorization header is set
+      // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       
-      const response = await axios.post(`/api/admin/approve-user/${userId}`);
-      console.log("Approval response:", response.data);
+      await axios.put(`/api/admin/approve-user/${userId}`);
       
-      // Refresh data after approval
-      await fetchDashboardData();
+      // Update UI immediately
+      const approvedUser = pendingUsers.find(user => user._id === userId);
       
-      // Show success message
-      setError('');
+      // Remove from pending users list
+      setPendingUsers(prevUsers => prevUsers.filter(user => user._id !== userId));
+      
+      // Add to verified users list if we have the user data
+      if (approvedUser) {
+        const updatedUser = {
+          ...approvedUser,
+          verification_status: 'approved',
+          approved_at: new Date().toISOString()
+        };
+        
+        // Make sure we don't add duplicates
+        setVerifiedUsers(prevUsers => {
+          // Check if user already exists in verified list
+          const userExists = prevUsers.some(user => user._id === userId);
+          if (userExists) {
+            // Replace the existing user with updated data
+            return prevUsers.map(user => 
+              user._id === userId ? updatedUser : user
+            );
+          } else {
+            // Add the new user to the top of the list
+            return [updatedUser, ...prevUsers];
+          }
+        });
+      }
+      
+      // Update user counts in statistics
+      setStats(prevStats => ({
+        ...prevStats,
+        users: {
+          ...prevStats.users,
+          total: prevStats.users.total,
+          verified: prevStats.users.verified + 1,
+          pending: prevStats.users.pending - 1
+        }
+      }));
+      
+      setSnackbar({
+        open: true,
+        message: 'User approved successfully',
+        severity: 'success'
+      });
     } catch (err) {
       console.error('Error approving user:', err);
-      
-      setError(`Failed to approve user: ${err.response?.data?.error || err.message}`);
+      setSnackbar({
+        open: true, 
+        message: `Failed to approve user: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
     } finally {
-      setActionLoading(false);
+      setActionLoading('');
+      // Refresh data in the background to ensure consistency
+      fetchDashboardData(false);
     }
   };
 
   const handleRejectUser = async (userId) => {
-    setActionLoading(true);
+    setActionLoading(userId);
     try {
-      console.log(`Rejecting user with ID: ${userId}`);
-      
       const adminToken = localStorage.getItem('adminToken');
-      if (!adminToken) {
-        throw new Error('No admin token found');
+      const adminInfoStr = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfoStr) {
+        throw new Error('Admin authentication required');
       }
       
-      // Ensure the authorization header is set
+      // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       
-      const response = await axios.post(`/api/admin/reject-user/${userId}`);
-      console.log("Rejection response:", response.data);
+      await axios.put(`/api/admin/reject-user/${userId}`);
       
-      // Refresh data after rejection
-      await fetchDashboardData();
+      // Update UI immediately
+      setPendingUsers(prevUsers => prevUsers.filter(user => user._id !== userId));
       
-      // Show success message
-      setError('');
+      // Update user counts in statistics
+      setStats(prevStats => ({
+        ...prevStats,
+        users: {
+          ...prevStats.users,
+          total: prevStats.users.total - 1,
+          pending: prevStats.users.pending - 1
+        }
+      }));
+      
+      setSnackbar({
+        open: true,
+        message: 'User rejected successfully',
+        severity: 'success'
+      });
     } catch (err) {
       console.error('Error rejecting user:', err);
-      
-      setError(`Failed to reject user: ${err.response?.data?.error || err.message}`);
+      setSnackbar({
+        open: true, 
+        message: `Failed to reject user: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
     } finally {
-      setActionLoading(false);
+      setActionLoading('');
+      // Refresh data in the background to ensure consistency
+      fetchDashboardData(false);
     }
   };
 
@@ -401,10 +720,55 @@ const AdminDashboard = () => {
     navigate('/');
   };
 
-  // User details dialog logic is not implemented
+  // Handler for navigating to student pages while preserving admin session
+  const handleStudentPageNavigation = (path) => {
+    try {
+      // Set admin visiting flag
+      localStorage.setItem('adminVisitingStudentPage', 'true');
+      
+      // Get admin credentials
+      const adminToken = localStorage.getItem('adminToken');
+      const adminInfo = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfo) {
+        throw new Error('Admin credentials missing');
+      }
+      
+      // Save admin credentials in special keys
+      localStorage.setItem('lastAdminToken', adminToken);
+      localStorage.setItem('lastAdminInfo', adminInfo);
+      
+      // IMPORTANT: Create a temporary user token for SharedRoute to recognize
+      // This ensures we don't get redirected to login
+      localStorage.setItem('token', adminToken);
+      
+      // Set axios headers
+      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
+      
+      // Correct path if needed
+      const correctedPath = path === '/ride-sharing' ? '/ride-booking' : path;
+      
+      // Navigate to page
+      console.log(`Admin navigating to: ${correctedPath}`);
+      navigate(correctedPath);
+    } catch (error) {
+      console.error('Error during navigation:', error);
+      // Fallback to login if there's a problem
+      navigate('/admin-login');
+    }
+  };
+
+  const [userDetailsOpen, setUserDetailsOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+
   const handleViewUserDetails = (user) => {
-    // TODO: Implement user details logic
-    console.log('View User Details:', user);
+    setSelectedUser(user);
+    setUserDetailsOpen(true);
+  };
+
+  const handleCloseUserDetails = () => {
+    setUserDetailsOpen(false);
+    setSelectedUser(null);
   };
 
 
@@ -413,9 +777,8 @@ const AdminDashboard = () => {
   // Safety check for stats
   const safeStats = stats || {
     users: { total: 0, verified: 0, pending: 0 },
-    rooms: { total: 0 },
     marketplace: { total_items: 0 },
-    recent_activities: { bookings: [], items: [] }
+    recent_activities: { items: [] }
   };
 
   // Sidebar drawer content
@@ -521,11 +884,26 @@ const AdminDashboard = () => {
           </ListItemIcon>
           <ListItemText primary="Logout" />
         </ListItem>
-        <ListItem button onClick={() => navigate('/')}>
+      </List>
+      <Divider />
+      <List>
+        <ListItem button onClick={() => handleStudentPageNavigation('/marketplace')}>
           <ListItemIcon>
-            <HomeIcon />
+            <StoreIcon />
           </ListItemIcon>
-          <ListItemText primary="Go to Homepage" />
+          <ListItemText primary="Visit Marketplace" />
+        </ListItem>
+        <ListItem button onClick={() => handleStudentPageNavigation('/lost-found')}>
+          <ListItemIcon>
+            <HelpOutlineIcon />
+          </ListItemIcon>
+          <ListItemText primary="Visit Lost & Found" />
+        </ListItem>
+        <ListItem button onClick={() => handleStudentPageNavigation('/ride-sharing')}>
+          <ListItemIcon>
+            <DirectionsBusIcon />
+          </ListItemIcon>
+          <ListItemText primary="Visit Ride Share" />
         </ListItem>
       </List>
     </div>
@@ -544,12 +922,13 @@ const AdminDashboard = () => {
     switch (activeView) {
       case 'dashboard':
         return (
-          <Box sx={{ mt: 3 }}>
+          <Box sx={{ mt: 2 }}>
             <Typography variant="h5" sx={{ mb: 3 }}>Dashboard Overview</Typography>
-            <Grid container spacing={3}>
-              {/* Summary cards */}
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ backgroundColor: '#e3f2fd', borderRadius: '12px' }}>
+            
+            {/* Stats Cards */}
+            <Grid container spacing={3} sx={{ mb: 4 }}>
+              <Grid item xs={12} sm={6} md={4}>
+                <Card sx={{ backgroundColor: '#e3f2fd', borderRadius: '12px', height: '100%' }}>
                   <CardContent>
                     <Typography variant="h6" color="#1565c0">Total Users</Typography>
                     <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.users.total}</Typography>
@@ -560,8 +939,9 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ backgroundColor: '#fff8e1', borderRadius: '12px' }}>
+              
+              <Grid item xs={12} sm={6} md={4}>
+                <Card sx={{ backgroundColor: '#fff8e1', borderRadius: '12px', height: '100%' }}>
                   <CardContent>
                     <Typography variant="h6" color="#ed6c02">Pending Verification</Typography>
                     <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.users.pending}</Typography>
@@ -572,20 +952,9 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ backgroundColor: '#f1f8e9', borderRadius: '12px' }}>
-                  <CardContent>
-                    <Typography variant="h6" color="#2e7d32">Active Rooms</Typography>
-                    <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.rooms.total}</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <MeetingRoomIcon color="success" />
-                      <Typography variant="body2" sx={{ ml: 1 }}>Available rooms</Typography>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={6} md={3}>
-                <Card sx={{ backgroundColor: '#ffebee', borderRadius: '12px' }}>
+              
+              <Grid item xs={12} sm={6} md={4}>
+                <Card sx={{ backgroundColor: '#ffebee', borderRadius: '12px', height: '100%' }}>
                   <CardContent>
                     <Typography variant="h6" color="#c62828">Marketplace Items</Typography>
                     <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.marketplace.total_items}</Typography>
@@ -596,60 +965,35 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
               </Grid>
+            </Grid>
 
-              {/* Recent activities section */}
+            {/* Recent activities section */}
+            <Grid container spacing={3}>
               <Grid item xs={12}>
                 <Paper sx={{ p: 3, borderRadius: '12px' }}>
                   <Typography variant="h6" sx={{ mb: 2 }}>Recent Activities</Typography>
                   <Divider sx={{ mb: 2 }} />
                   
-                  <Grid container spacing={3}>
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle1" sx={{ mb: 1 }}>Latest Bookings</Typography>
-                      {safeStats.recent_activities.bookings.length > 0 ? (
-                        <List>
-                          {safeStats.recent_activities.bookings.map((booking) => (
-                            <ListItem key={booking._id} divider>
-                              <ListItemAvatar>
-                                <Avatar sx={{ bgcolor: '#1976d2' }}>
-                                  <MeetingRoomIcon />
-                                </Avatar>
-                              </ListItemAvatar>
-                              <ListItemText
-                                primary={`Room Booking: ${booking.purpose}`}
-                                secondary={`Date: ${new Date(booking.date).toLocaleDateString()} | Time: ${booking.start_time}-${booking.end_time}`}
-                              />
-                            </ListItem>
-                          ))}
-                        </List>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">No recent bookings</Typography>
-                      )}
-                    </Grid>
-                    
-                    <Grid item xs={12} md={6}>
-                      <Typography variant="subtitle1" sx={{ mb: 1 }}>Latest Marketplace Items</Typography>
-                      {safeStats.recent_activities.items.length > 0 ? (
-                        <List>
-                          {safeStats.recent_activities.items.map((item) => (
-                            <ListItem key={item._id} divider>
-                              <ListItemAvatar>
-                                <Avatar sx={{ bgcolor: '#c62828' }}>
-                                  <StoreIcon />
-                                </Avatar>
-                              </ListItemAvatar>
-                              <ListItemText
-                                primary={item.title}
-                                secondary={`Price: $${item.price} | Category: ${item.category}`}
-                              />
-                            </ListItem>
-                          ))}
-                        </List>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">No recent marketplace items</Typography>
-                      )}
-                    </Grid>
-                  </Grid>
+                  <Typography variant="subtitle1" sx={{ mb: 1 }}>Latest Marketplace Items</Typography>
+                  {safeStats.recent_activities.items.length > 0 ? (
+                    <List sx={{ width: '100%' }}>
+                      {safeStats.recent_activities.items.map((item) => (
+                        <ListItem key={item._id} divider>
+                          <ListItemAvatar>
+                            <Avatar sx={{ bgcolor: '#c62828' }}>
+                              <StoreIcon />
+                            </Avatar>
+                          </ListItemAvatar>
+                          <ListItemText
+                            primary={item.title}
+                            secondary={`Price: $${item.price} | Category: ${item.category}`}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">No recent marketplace items</Typography>
+                  )}
                 </Paper>
               </Grid>
             </Grid>
@@ -658,19 +1002,19 @@ const AdminDashboard = () => {
 
       case 'pending':
         return (
-          <Box sx={{ mt: 3 }}>
-            <Typography variant="h5" sx={{ mb: 3 }}>Pending Verification Requests</Typography>
+          <Box sx={{ mt: 2, maxWidth: '100%' }}>
+            <Typography variant="h5" sx={{ mb: 3 }}>Pending Verification</Typography>
             <Paper sx={{ p: 3, borderRadius: '12px' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                 <Typography variant="h6">
-                  Pending Requests ({pendingUsers.length})
+                  Pending Users ({pendingUsers.length})
                 </Typography>
                 <Button 
                   variant="outlined" 
                   color="primary" 
                   onClick={fetchDashboardData}
-                  disabled={actionLoading}
-                  startIcon={actionLoading ? <CircularProgress size={20} /> : null}
+                  disabled={actionLoading !== ''}
+                  size="small"
                 >
                   Refresh
                 </Button>
@@ -678,60 +1022,61 @@ const AdminDashboard = () => {
               <Divider sx={{ mb: 2 }} />
               
               {pendingUsers.length > 0 ? (
-                <List>
+                <List sx={{ width: '100%', p: 0 }}>
                   {pendingUsers.map((user) => (
                     <ListItem 
                       key={user._id} 
-                      divider 
+                      divider
+                      sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' } }}
                       secondaryAction={
-                        <Box>
+                        <Box sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 1, 
+                          width: { xs: '100%', md: 'auto' },
+                          mt: { xs: 1, md: 0 }
+                        }}>
                           <Button 
                             variant="outlined" 
                             color="primary" 
                             size="small" 
                             onClick={() => handleViewUserDetails(user)}
-                            sx={{ mr: 1 }}
                           >
-                            View Details
+                            View
                           </Button>
                           <Button 
                             variant="contained" 
                             color="success" 
                             size="small" 
                             onClick={() => handleApproveUser(user._id)}
-                            sx={{ mr: 1 }}
-                            disabled={actionLoading}
+                            disabled={actionLoading === user._id}
                           >
-                            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Approve'}
+                            {actionLoading === user._id ? <CircularProgress size={20} color="inherit" /> : 'Approve'}
                           </Button>
                           <Button 
                             variant="contained" 
                             color="error" 
                             size="small" 
                             onClick={() => handleRejectUser(user._id)}
-                            disabled={actionLoading}
+                            disabled={actionLoading === user._id}
                           >
-                            {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Reject'}
+                            {actionLoading === user._id ? <CircularProgress size={20} color="inherit" /> : 'Reject'}
                           </Button>
                         </Box>
                       }
                     >
                       <ListItemAvatar>
-                        <Avatar sx={{ bgcolor: '#ed6c02' }}>
-                          <PendingActionsIcon />
+                        <Avatar src={user.profile_picture || ''}>
+                          {user.name ? user.name.charAt(0) : 'U'}
                         </Avatar>
                       </ListItemAvatar>
                       <ListItemText
                         primary={user.name}
                         secondary={
                           <>
-                            <Typography component="span" variant="body2">
-                              Email: {user.email} | Student ID: {user.student_id}
-                            </Typography>
+                            {user.email} • {user.student_id || 'No ID'} • {user.department || 'No Dept'}
                             <br />
-                            <Typography component="span" variant="body2">
-                              Department: {user.department} | Semester: {user.semester}
-                            </Typography>
+                            Registered: {new Date(user.created_at).toLocaleDateString()}
                           </>
                         }
                       />
@@ -749,7 +1094,7 @@ const AdminDashboard = () => {
 
       case 'verified':
         return (
-          <Box sx={{ mt: 3 }}>
+          <Box sx={{ mt: 2, maxWidth: '100%' }}>
             <Typography variant="h5" sx={{ mb: 3 }}>Verified Users</Typography>
             <Paper sx={{ p: 3, borderRadius: '12px' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -760,7 +1105,8 @@ const AdminDashboard = () => {
                   variant="outlined" 
                   color="primary" 
                   onClick={fetchDashboardData}
-                  disabled={actionLoading}
+                  disabled={actionLoading !== ''}
+                  size="small"
                 >
                   Refresh
                 </Button>
@@ -768,28 +1114,33 @@ const AdminDashboard = () => {
               <Divider sx={{ mb: 2 }} />
               
               {verifiedUsers.length > 0 ? (
-                <List>
+                <List sx={{ width: '100%', p: 0 }}>
                   {verifiedUsers.map((user) => (
                     <ListItem 
                       key={user._id} 
                       divider
+                      sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' } }}
                       secondaryAction={
-                        <Box>
+                        <Box sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 1, 
+                          width: { xs: '100%', md: 'auto' },
+                          mt: { xs: 1, md: 0 }
+                        }}>
                           <Button 
                             variant="outlined"
                             color="primary"
                             size="small"
                             onClick={() => handleViewUserDetails(user)}
-                            sx={{ mr: 1 }}
                           >
-                            View Details
+                            View
                           </Button>
                           <Button 
                             variant="contained"
                             color="info"
                             size="small"
                             onClick={() => handleEditUser(user)}
-                            sx={{ mr: 1 }}
                           >
                             Edit
                           </Button>
@@ -797,29 +1148,26 @@ const AdminDashboard = () => {
                             variant="contained"
                             color="error"
                             size="small"
-                            onClick={() => handleDeleteUser(user)}
+                            onClick={() => handleDeleteVerifiedUser(user._id)}
+                            disabled={actionLoading === user._id}
                           >
-                            Delete
+                            {actionLoading === user._id ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
                           </Button>
                         </Box>
                       }
                     >
                       <ListItemAvatar>
-                        <Avatar sx={{ bgcolor: '#2e7d32' }}>
-                          <DoneAllIcon />
+                        <Avatar src={user.profile_picture || ''}>
+                          {user.name ? user.name.charAt(0) : 'U'}
                         </Avatar>
                       </ListItemAvatar>
                       <ListItemText
                         primary={user.name}
                         secondary={
                           <>
-                            <Typography component="span" variant="body2">
-                              Email: {user.email} | Student ID: {user.student_id}
-                            </Typography>
+                            {user.email} • {user.student_id || 'No ID'} • {user.department || 'No Dept'}
                             <br />
-                            <Typography component="span" variant="body2">
-                              Department: {user.department} | Semester: {user.semester}
-                            </Typography>
+                            Verified: {user.approved_at ? new Date(user.approved_at).toLocaleDateString() : 'N/A'}
                           </>
                         }
                       />
@@ -828,7 +1176,7 @@ const AdminDashboard = () => {
                 </List>
               ) : (
                 <Typography variant="body1" align="center" sx={{ py: 3 }}>
-                  No verified users yet
+                  No verified users found
                 </Typography>
               )}
             </Paper>
@@ -837,7 +1185,7 @@ const AdminDashboard = () => {
 
       case 'marketplace':
         return (
-          <Box sx={{ mt: 3 }}>
+          <Box sx={{ mt: 2, maxWidth: '100%' }}>
             <Typography variant="h5" sx={{ mb: 3 }}>Manage Marketplace</Typography>
             <Paper sx={{ p: 3, borderRadius: '12px' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -848,26 +1196,41 @@ const AdminDashboard = () => {
                   variant="outlined" 
                   color="primary" 
                   onClick={fetchMarketplaceData}
-                  disabled={actionLoading}
+                  disabled={actionLoading !== ''}
+                  size="small"
                 >
                   Refresh
                 </Button>
               </Box>
               <Divider sx={{ mb: 2 }} />
-              {marketplaceItems.length > 0 ? (
-                <List>
+              {marketplaceItems.length > 0 ?
+                <List sx={{ width: '100%', p: 0 }}>
                   {marketplaceItems.map((item) => (
                     <ListItem 
                       key={item._id} 
                       divider
+                      sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' } }}
                       secondaryAction={
-                        <Box>
+                        <Box sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 1,
+                          width: { xs: '100%', md: 'auto' },
+                          mt: { xs: 1, md: 0 }
+                        }}>
+                          <Button 
+                            variant="contained"
+                            color="primary"
+                            size="small"
+                            onClick={() => handleViewMarketplaceItem(item)}
+                          >
+                            View
+                          </Button>
                           <Button 
                             variant="contained"
                             color="info"
                             size="small"
                             onClick={() => handleEditMarketplaceItem(item)}
-                            sx={{ mr: 1 }}
                             disabled={marketplaceActionLoading === item._id}
                           >
                             {marketplaceActionLoading === item._id ? <CircularProgress size={20} color="inherit" /> : 'Edit'}
@@ -896,7 +1259,7 @@ const AdminDashboard = () => {
                     </ListItem>
                   ))}
                 </List>
-              ) : (
+              : (
                 <Typography variant="body1" align="center" sx={{ py: 3 }}>
                   No marketplace items found
                 </Typography>
@@ -929,14 +1292,190 @@ const AdminDashboard = () => {
           </Box>
         );
 
+      case 'users':
+        return (
+          <Box sx={{ mt: 2, maxWidth: '100%' }}>
+            <Typography variant="h5" sx={{ mb: 3 }}>Manage Users</Typography>
+            
+            {/* Pending Verification Users Section */}
+            <Paper sx={{ p: 3, mb: 3, borderRadius: '12px' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">Pending Verification ({pendingUsers.length})</Typography>
+                <Button 
+                  variant="outlined" 
+                  color="primary" 
+                  onClick={fetchDashboardData}
+                  disabled={actionLoading !== ''}
+                  size="small"
+                >
+                  Refresh
+                </Button>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              
+              {pendingUsers.length > 0 ? (
+                <List sx={{ width: '100%', p: 0 }}>
+                  {pendingUsers.map((user) => (
+                    <ListItem 
+                      key={user._id} 
+                      divider
+                      sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' } }}
+                      secondaryAction={
+                        <Box sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 1, 
+                          width: { xs: '100%', md: 'auto' },
+                          mt: { xs: 1, md: 0 }
+                        }}>
+                          <Button 
+                            variant="outlined"
+                            color="primary"
+                            size="small"
+                            onClick={() => handleViewUserDetails(user)}
+                          >
+                            View
+                          </Button>
+                          <Button 
+                            variant="contained"
+                            color="success"
+                            size="small"
+                            onClick={() => handleApproveUser(user._id)}
+                            disabled={actionLoading === user._id}
+                          >
+                            {actionLoading === user._id ? <CircularProgress size={20} /> : 'Approve'}
+                          </Button>
+                          <Button 
+                            variant="contained"
+                            color="error"
+                            size="small"
+                            onClick={() => handleRejectUser(user._id)}
+                            disabled={actionLoading === user._id}
+                          >
+                            {actionLoading === user._id ? <CircularProgress size={20} /> : 'Reject'}
+                          </Button>
+                        </Box>
+                      }
+                    >
+                      <ListItemAvatar>
+                        <Avatar src={user.profile_picture || ''}>
+                          {user.name ? user.name.charAt(0) : 'U'}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={user.name}
+                        secondary={
+                          <>
+                            {user.email} • {user.student_id || 'No ID'} • {user.department || 'No Dept'}
+                            <br />
+                            Registered: {new Date(user.created_at).toLocaleDateString()}
+                          </>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              ) : (
+                <Typography variant="body1" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                  No pending verification requests
+                </Typography>
+              )}
+            </Paper>
+            
+            {/* Verified Users Section */}
+            <Paper sx={{ p: 3, borderRadius: '12px' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">Verified Users ({verifiedUsers.length})</Typography>
+                <Button 
+                  variant="outlined" 
+                  color="primary" 
+                  onClick={fetchDashboardData}
+                  disabled={actionLoading !== ''}
+                  size="small"
+                >
+                  Refresh
+                </Button>
+              </Box>
+              <Divider sx={{ mb: 2 }} />
+              
+              {verifiedUsers.length > 0 ? (
+                <List sx={{ width: '100%', p: 0 }}>
+                  {verifiedUsers.map((user) => (
+                    <ListItem 
+                      key={user._id} 
+                      divider
+                      sx={{ flexWrap: { xs: 'wrap', md: 'nowrap' } }}
+                      secondaryAction={
+                        <Box sx={{ 
+                          display: 'flex', 
+                          flexWrap: 'wrap', 
+                          gap: 1, 
+                          width: { xs: '100%', md: 'auto' },
+                          mt: { xs: 1, md: 0 }
+                        }}>
+                          <Button 
+                            variant="outlined"
+                            color="primary"
+                            size="small"
+                            onClick={() => handleViewUserDetails(user)}
+                          >
+                            View
+                          </Button>
+                          <Button 
+                            variant="contained"
+                            color="info"
+                            size="small"
+                            onClick={() => handleEditUser(user)}
+                          >
+                            Edit
+                          </Button>
+                          <Button 
+                            variant="contained"
+                            color="error"
+                            size="small"
+                            onClick={() => handleDeleteVerifiedUser(user._id)}
+                            disabled={actionLoading === user._id}
+                          >
+                            {actionLoading === user._id ? <CircularProgress size={20} /> : 'Delete'}
+                          </Button>
+                        </Box>
+                      }
+                    >
+                      <ListItemAvatar>
+                        <Avatar src={user.profile_picture || ''}>
+                          {user.name ? user.name.charAt(0) : 'U'}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={user.name}
+                        secondary={
+                          <>
+                            {user.email} • {user.student_id || 'No ID'} • {user.department || 'No Dept'}
+                            <br />
+                            Verified: {user.approved_at ? new Date(user.approved_at).toLocaleDateString() : 'N/A'}
+                          </>
+                        }
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              ) : (
+                <Typography variant="body1" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                  No verified users found
+                </Typography>
+              )}
+            </Paper>
+          </Box>
+        );
+
       default:
         return <Typography>Select an option from the sidebar</Typography>;
     }
   };
 
   return (
-    <>
-      {/* Delete User Confirmation Dialog */}
+    <Box sx={{ display: 'flex', maxWidth: '100vw', overflow: 'hidden' }}>
+      {/* Dialogs and Modals */}
       {deleteConfirmOpen && (
         <Dialog open={deleteConfirmOpen} onClose={handleDeleteUserClose}>
           <DialogTitle>Confirm Delete</DialogTitle>
@@ -951,60 +1490,33 @@ const AdminDashboard = () => {
           </DialogActions>
         </Dialog>
       )}
-      {/* Edit User Drawer/Modal */}
-      {editUserOpen && (
-        <Drawer anchor="right" open={editUserOpen} onClose={handleEditUserClose} sx={{'& .MuiDrawer-paper': { width: 400, p: 3 }}}>
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>Edit User</Typography>
-            <TextField
-              label="Name"
-              value={editUserData?.name || ''}
-              onChange={e => setEditUserData({ ...editUserData, name: e.target.value })}
-              fullWidth
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Email"
-              value={editUserData?.email || ''}
-              onChange={e => setEditUserData({ ...editUserData, email: e.target.value })}
-              fullWidth
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Student ID"
-              value={editUserData?.student_id || ''}
-              onChange={e => setEditUserData({ ...editUserData, student_id: e.target.value })}
-              fullWidth
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Department"
-              value={editUserData?.department || ''}
-              onChange={e => setEditUserData({ ...editUserData, department: e.target.value })}
-              fullWidth
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Semester"
-              value={editUserData?.semester || ''}
-              onChange={e => setEditUserData({ ...editUserData, semester: e.target.value })}
-              fullWidth
-              sx={{ mb: 2 }}
-            />
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-              <Button onClick={handleEditUserClose} color="primary" sx={{ mr: 2 }}>Cancel</Button>
-              <Button onClick={handleEditUserSave} color="success" variant="contained" disabled={actionLoading}>
-                {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Save'}
-              </Button>
-            </Box>
-          </Box>
-        </Drawer>
+      
+      {/* Delete Marketplace Item Dialog */}
+      {deleteMarketplaceOpen && (
+        <Dialog open={deleteMarketplaceOpen} onClose={handleDeleteMarketplaceClose}>
+          <DialogTitle>Confirm Delete</DialogTitle>
+          <DialogContent>
+            <Typography>Are you sure you want to delete item <b>{marketplaceToDelete?.title}</b>?</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleDeleteMarketplaceClose} color="primary">Cancel</Button>
+            <Button onClick={handleDeleteMarketplaceConfirm} color="error" disabled={marketplaceActionLoading === marketplaceToDelete?._id}>
+              {marketplaceActionLoading === marketplaceToDelete?._id ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
+            </Button>
+          </DialogActions>
+        </Dialog>
       )}
+      
       {/* Edit Marketplace Item Drawer */}
-      {editMarketplaceOpen && (
-        <Drawer anchor="right" open={editMarketplaceOpen} onClose={handleEditMarketplaceClose} sx={{'& .MuiDrawer-paper': { width: 400, p: 3 }}}>
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>Edit Marketplace Item</Typography>
+      {editMarketplaceOpen && editMarketplaceData && (
+        <Drawer
+          anchor="right"
+          open={editMarketplaceOpen}
+          onClose={handleEditMarketplaceClose}
+          sx={{ '& .MuiDrawer-paper': { width: { xs: '100%', sm: 400 } } }}
+        >
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ mb: 3 }}>Edit Item</Typography>
             <TextField
               label="Title"
               value={editMarketplaceData?.title || ''}
@@ -1052,54 +1564,94 @@ const AdminDashboard = () => {
           </Box>
         </Drawer>
       )}
-      {/* Delete Marketplace Item Dialog */}
-      {deleteMarketplaceOpen && (
-        <Dialog open={deleteMarketplaceOpen} onClose={handleDeleteMarketplaceClose}>
-          <DialogTitle>Confirm Delete</DialogTitle>
-          <DialogContent>
-            <Typography>Are you sure you want to delete item <b>{marketplaceToDelete?.title}</b>?</Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={handleDeleteMarketplaceClose} color="primary">Cancel</Button>
-            <Button onClick={handleDeleteMarketplaceConfirm} color="error" disabled={marketplaceActionLoading === marketplaceToDelete?._id}>
-              {marketplaceActionLoading === marketplaceToDelete?._id ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
-            </Button>
-          </DialogActions>
-        </Dialog>
-      )}
-      <Box sx={{ display: 'flex' }}>
-        <CssBaseline />
-        <AppBar
-          position="fixed"
-          sx={{
-            width: { sm: `calc(100% - ${drawerWidth}px)` },
-            ml: { sm: `${drawerWidth}px` },
-            bgcolor: '#1a237e'
-          }}
-        >
-          <Toolbar>
-            <IconButton
-              color="inherit"
-              aria-label="open drawer"
-              edge="start"
-              onClick={handleDrawerToggle}
-              sx={{ mr: 2, display: { sm: 'none' } }}
-            >
-              <MenuIcon />
-            </IconButton>
-            <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-              Admin Dashboard
-            </Typography>
-            <Button 
-              color="inherit" 
-              onClick={handleLogout}
-              startIcon={<ExitToAppIcon />}
-            >
-              Logout
-            </Button>
-          </Toolbar>
-        </AppBar>
       
+      {/* Edit User Drawer */}
+      {editUserOpen && (
+        <Drawer 
+          anchor="right" 
+          open={editUserOpen} 
+          onClose={handleEditUserClose} 
+          sx={{ '& .MuiDrawer-paper': { width: { xs: '100%', sm: 400 }, p: 0 } }}
+        >
+          <Box sx={{ p: 3 }}>
+            <Typography variant="h6" sx={{ mb: 3 }}>Edit User</Typography>
+            <TextField
+              label="Name"
+              value={editUserData?.name || ''}
+              onChange={e => setEditUserData({ ...editUserData, name: e.target.value })}
+              fullWidth
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Email"
+              value={editUserData?.email || ''}
+              onChange={e => setEditUserData({ ...editUserData, email: e.target.value })}
+              fullWidth
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Student ID"
+              value={editUserData?.student_id || ''}
+              onChange={e => setEditUserData({ ...editUserData, student_id: e.target.value })}
+              fullWidth
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Department"
+              value={editUserData?.department || ''}
+              onChange={e => setEditUserData({ ...editUserData, department: e.target.value })}
+              fullWidth
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Semester"
+              value={editUserData?.semester || ''}
+              onChange={e => setEditUserData({ ...editUserData, semester: e.target.value })}
+              fullWidth
+              sx={{ mb: 2 }}
+            />
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
+              <Button onClick={handleEditUserClose} color="primary" sx={{ mr: 2 }}>Cancel</Button>
+              <Button 
+                onClick={handleEditUserSave} 
+                color="success" 
+                variant="contained" 
+                disabled={actionLoading}
+              >
+                {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Save'}
+              </Button>
+            </Box>
+          </Box>
+        </Drawer>
+      )}
+      
+      {/* Layout */}
+      <CssBaseline />
+      <AppBar
+        position="fixed"
+        sx={{
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          ml: { sm: `${drawerWidth}px` },
+          boxSizing: 'border-box',
+          bgcolor: '#1a237e'
+        }}
+      >
+        <Toolbar>
+          <IconButton
+            color="inherit"
+            aria-label="open drawer"
+            edge="start"
+            onClick={handleDrawerToggle}
+            sx={{ mr: 2, display: { sm: 'none' } }}
+          >
+            <MenuIcon />
+          </IconButton>
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
+            Admin Dashboard
+          </Typography>
+        </Toolbar>
+      </AppBar>
+
       {/* Sidebar */}
       <Box
         component="nav"
@@ -1139,24 +1691,88 @@ const AdminDashboard = () => {
         component="main"
         sx={{ 
           flexGrow: 1, 
-          p: 3, 
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          p: { xs: 2, sm: 3 }, 
+          width: { xs: '100%', sm: `calc(100% - ${drawerWidth}px)` },
+          maxWidth: '100%',
+          overflowX: 'hidden',
           bgcolor: '#f5f5f5', 
           minHeight: '100vh' 
         }}
       >
         <Toolbar /> {/* Spacer for AppBar */}
-        {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
         {renderContent()}
       </Box>
+
+      {/* Marketplace Item Details Drawer */}
+      <MarketplaceItemDetailsDrawer
+        open={marketplaceItemDetails.open}
+        item={marketplaceItemDetails.item}
+        onClose={handleCloseMarketplaceItemDetails}
+      />
+
+      {/* User Details Dialog */}
+      <Dialog open={userDetailsOpen} onClose={handleCloseUserDetails} maxWidth="sm" fullWidth>
+        <DialogTitle>User Details</DialogTitle>
+        <DialogContent>
+          {selectedUser && (
+            <Box>
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Name:</strong> {selectedUser.name}
+              </Typography>
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Email:</strong> {selectedUser.email}
+              </Typography>
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Username:</strong> {selectedUser.username}
+              </Typography>
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Department:</strong> {selectedUser.department}
+              </Typography>
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Semester:</strong> {selectedUser.semester}
+              </Typography>
+              <Typography variant="subtitle1" gutterBottom>
+                <strong>Status:</strong> {selectedUser.verification_status}
+              </Typography>
+              {selectedUser.id_card_photo && (
+                <Box mt={2}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    <strong>ID Card:</strong>
+                  </Typography>
+                  <img 
+                    src={selectedUser.id_card_photo} 
+                    alt="ID Card" 
+                    style={{ maxWidth: '100%', height: 'auto' }} 
+                  />
+                </Box>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseUserDetails} color="primary">
+            Close
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={5000}
+        onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} 
+          severity={snackbar.severity} 
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
-    {/* Marketplace Item Details Drawer */}
-    <MarketplaceItemDetailsDrawer
-      open={marketplaceItemDetails.open}
-      item={marketplaceItemDetails.item}
-      onClose={handleCloseMarketplaceItemDetails}
-    />
-    </>
   );
 };
 

@@ -78,7 +78,7 @@ def update_user(user_id):
             return jsonify({"error": "No data provided"}), 400
         
         # Fields that can be updated
-        allowed_fields = ['name', 'student_id', 'department', 'semester', 'phone']
+        allowed_fields = ['name', 'student_id', 'department', 'semester', 'phone', 'address']
         update_data = {k: v for k, v in data.items() if k in allowed_fields}
         
         # Add updated timestamp
@@ -165,6 +165,86 @@ def update_profile_picture(user_id):
         }), 200
     except Exception as e:
         current_app.logger.error(f"Error updating profile picture: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@users_bp.route('/<user_id>/delete-profile-picture', methods=['DELETE'])
+@limiter.limit("5 per minute")
+@jwt_required()
+def delete_profile_picture(user_id):
+    """Delete user profile picture"""
+    try:
+        # Get user's ID from JWT token for authorization
+        token_user_id = get_jwt_identity()
+        
+        # Only allow users to delete their own profile picture
+        if token_user_id != user_id:
+            return jsonify({"error": "Unauthorized to delete profile picture"}), 403
+        
+        # Get user data
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Check if user has a profile picture
+        if 'profile_picture' not in user or not user['profile_picture']:
+            return jsonify({"message": "No profile picture to delete"}), 200
+        
+        # Delete profile picture file
+        picture_path = os.path.join(os.path.dirname(UPLOAD_FOLDER), user['profile_picture'].lstrip('/'))
+        if os.path.exists(picture_path):
+            os.remove(picture_path)
+        
+        # Update user record to remove profile picture reference
+        db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$unset": {"profile_picture": ""}, "$set": {"updated_at": datetime.datetime.utcnow()}}
+        )
+        
+        return jsonify({"message": "Profile picture deleted successfully"}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error deleting profile picture: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@users_bp.route('/<user_id>/purchase-history', methods=['GET'])
+@limiter.limit("30 per minute")
+@jwt_required()
+def get_purchase_history(user_id):
+    """Get user purchase history"""
+    try:
+        # Get user's ID from JWT token for authorization
+        token_user_id = get_jwt_identity()
+        
+        # Only allow users to access their own purchase history
+        if token_user_id != user_id:
+            return jsonify({"error": "Unauthorized to access purchase history"}), 403
+        
+        # Get purchase history from database
+        purchases = list(db.purchases.find({"user_id": ObjectId(user_id)}))
+        if not purchases:
+            return jsonify([]), 200
+        
+        # Format purchase data
+        formatted_purchases = []
+        for purchase in purchases:
+            purchase['_id'] = str(purchase['_id'])
+            purchase['user_id'] = str(purchase['user_id'])
+            if 'item_id' in purchase:
+                purchase['item_id'] = str(purchase['item_id'])
+                
+                # Get item details if available
+                item = db.marketplace_items.find_one({"_id": ObjectId(purchase['item_id'])})
+                if item:
+                    purchase['item'] = {
+                        'title': item.get('title', ''),
+                        'price': item.get('price', 0),
+                        'category': item.get('category', '')
+                    }
+            
+            formatted_purchases.append(purchase)
+        
+        return jsonify(formatted_purchases), 200
+    except Exception as e:
+        current_app.logger.error(f"Error getting purchase history: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @users_bp.route('/marketplace/user-items/<user_id>', methods=['GET'])

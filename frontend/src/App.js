@@ -7,6 +7,7 @@ import { CircularProgress, Box } from '@mui/material';
 // Eagerly load critical components
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
+import SharedRoute from './components/SharedRoute';
 
 // Lazy load pages for better performance
 const Home = lazy(() => import('./pages/Home'));
@@ -18,6 +19,8 @@ const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Marketplace = lazy(() => import('./pages/Marketplace'));
 const LostFound = lazy(() => import('./pages/LostFound'));
 const RideBooking = lazy(() => import('./pages/RideBooking'));
+const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 
 // Loading component for suspense fallback
 const LoadingFallback = () => (
@@ -99,6 +102,8 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/admin-login" element={<AdminLogin />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             
             {/* Protected admin routes */}
             <Route path="/admin-dashboard" element={
@@ -107,26 +112,33 @@ function App() {
               </AdminRoute>
             } />
             
-            {/* Protected user routes */}
+            {/* Protected user routes - accessible only to regular users */}
             <Route path="/profile" element={
               <ProtectedRoute>
                 <UserProfile />
               </ProtectedRoute>
             } />
+            
+            {/* Shared routes - accessible to both admins and regular users */}
             <Route path="/marketplace" element={
-              <ProtectedRoute>
+              <SharedRoute>
                 <Marketplace />
-              </ProtectedRoute>
+              </SharedRoute>
             } />
             <Route path="/lost-found" element={
-              <ProtectedRoute>
+              <SharedRoute>
                 <LostFound />
-              </ProtectedRoute>
+              </SharedRoute>
             } />
             <Route path="/ride-booking" element={
-              <ProtectedRoute>
+              <SharedRoute>
                 <RideBooking />
-              </ProtectedRoute>
+              </SharedRoute>
+            } />
+            <Route path="/ride-sharing" element={
+              <SharedRoute>
+                <RideBooking />
+              </SharedRoute>
             } />
           </Routes>
         </Suspense>

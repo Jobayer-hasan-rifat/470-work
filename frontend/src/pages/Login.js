@@ -14,7 +14,7 @@ import {
 import { styled } from '@mui/material/styles';
 import { Link, useNavigate } from 'react-router-dom';
 import PersonIcon from '@mui/icons-material/Person';
-import axios from 'axios';
+import api from '../utils/api';
 import '../AppBackgrounds.css';
 
 // Styled components
@@ -92,7 +92,7 @@ const Login = () => {
     setError('');
     
     try {
-      const response = await axios.post('/api/auth/login', {
+      const response = await api.post('/api/auth/login', {
         identifier,
         password
       });
@@ -161,8 +161,25 @@ const Login = () => {
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            sx={{ mb: 3 }}
+            sx={{ mb: 1 }}
           />
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
+            <MuiLink
+              component={Link}
+              to="/forgot-password"
+              sx={{
+                color: 'var(--primary-main)',
+                fontSize: '0.875rem',
+                fontWeight: 500,
+                transition: 'color var(--transition-fast)',
+                '&:hover': {
+                  color: 'var(--primary-dark)',
+                }
+              }}
+            >
+              Forgot password?
+            </MuiLink>
+          </Box>
           <GradientButton
             type="submit"
             fullWidth

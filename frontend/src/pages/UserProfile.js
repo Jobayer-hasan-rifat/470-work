@@ -24,7 +24,12 @@ import {
   Snackbar,
   Alert,
   IconButton,
-  Chip
+  Chip,
+  List,
+  ListItem,
+  ListItemAvatar,
+  ListItemText,
+  ListItemSecondaryAction
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import SaveIcon from '@mui/icons-material/Save';
@@ -34,9 +39,12 @@ import StoreIcon from '@mui/icons-material/Store';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import LogoutIcon from '@mui/icons-material/Logout';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import '../AppBackgrounds.css';
+import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDrawer';
+import MarketplaceItemForm from '../components/MarketplaceItemForm';
 
 const UserProfile = () => {
   const navigate = useNavigate();
@@ -55,6 +63,15 @@ const UserProfile = () => {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingIdCard, setUploadingIdCard] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState({ open: false, postId: null, postType: null });
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [itemDetailsOpen, setItemDetailsOpen] = useState(false);
+  const [editItemOpen, setEditItemOpen] = useState(false);
+  const [selectedItemForEdit, setSelectedItemForEdit] = useState(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deletingItem, setDeletingItem] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [newItemOpen, setNewItemOpen] = useState(false);
 
   useEffect(() => {
     document.body.classList.add('user-profile-page');
@@ -127,7 +144,9 @@ const UserProfile = () => {
   const fetchMarketplacePosts = async (userId) => {
     setLoadingPosts(true);
     try {
-      const response = await axios.get(`/api/marketplace/items/user/${userId}`);
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/marketplace/items/user/${userId}?_=${timestamp}`);
       setMarketplacePosts(response.data || []);
       setLoadingPosts(false);
     } catch (err) {
@@ -138,7 +157,9 @@ const UserProfile = () => {
   
   const fetchLostFoundItems = async (userId) => {
     try {
-      const response = await axios.get(`/api/lost-found/user-items/${userId}`);
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/lost-found/user-items/${userId}?_=${timestamp}`);
       setLostFoundItems(response.data || []);
     } catch (err) {
       console.error('Error fetching lost & found items:', err);
@@ -147,7 +168,9 @@ const UserProfile = () => {
   
   const fetchRideRequests = async (userId) => {
     try {
-      const response = await axios.get(`/api/ride/user-requests/${userId}`);
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/ride/user-requests/${userId}?_=${timestamp}`);
       setRideRequests(response.data || []);
     } catch (err) {
       console.error('Error fetching ride requests:', err);
@@ -317,10 +340,12 @@ const UserProfile = () => {
     if (user?._id) {
       setLoadingPosts(true);
       
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
       const endpoint = 
-        tabValue === 0 ? `/api/marketplace/user-items/${user._id}` : 
-        tabValue === 1 ? `/api/lost-found/user-items/${user._id}` : 
-        `/api/ride/user-requests/${user._id}`;
+        tabValue === 0 ? `/api/marketplace/items/user/${user._id}?_=${timestamp}` : 
+        tabValue === 1 ? `/api/lost-found/user-items/${user._id}?_=${timestamp}` : 
+        `/api/ride/user-requests/${user._id}?_=${timestamp}`;
       
       axios.get(endpoint, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
@@ -336,11 +361,14 @@ const UserProfile = () => {
         })
         .catch(error => {
           console.error(`Error fetching user ${tabValue === 0 ? 'marketplace items' : tabValue === 1 ? 'lost & found items' : 'rides'}:`, error);
-          setSnackbar({
-            open: true,
-            message: `Failed to load your ${tabValue === 0 ? 'marketplace items' : tabValue === 1 ? 'lost & found items' : 'rides'}.`,
-            severity: 'error'
-          });
+          // Don't show the error message to the user, just reset the data to empty array
+          if (tabValue === 0) {
+            setMarketplacePosts([]);
+          } else if (tabValue === 1) {
+            setLostFoundItems([]);
+          } else {
+            setRideRequests([]);
+          }
         })
         .finally(() => {
           setLoadingPosts(false);
@@ -380,6 +408,16 @@ const UserProfile = () => {
         // Remove deleted item from state
         if (deleteDialog.postType === 'marketplace') {
           setMarketplacePosts(prev => prev.filter(item => item._id !== deleteDialog.postId));
+          
+          // Refresh the marketplace data to keep it in sync with other views
+          const userId = user?._id;
+          if (userId) {
+            // Add timestamp to prevent caching
+            const timestamp = new Date().getTime();
+            axios.get(`/api/marketplace/items/user/${userId}?_=${timestamp}`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
+          }
         } else if (deleteDialog.postType === 'lostfound') {
           setLostFoundItems(prev => prev.filter(item => item._id !== deleteDialog.postId));
         } else {
@@ -405,6 +443,62 @@ const UserProfile = () => {
       });
   };
 
+  const handleCreateNewItem = () => {
+    setNewItemOpen(true);
+  };
+
+  const handleNewItemSuccess = (newItemData) => {
+    // Handle different response data structures
+    const newItem = newItemData.item || newItemData;
+    
+    // Add the new item to the marketplacePosts at the beginning of the array if it's valid
+    if (newItem && (newItem._id || newItem.item_id)) {
+      // If we need to refresh to get the complete item data
+      if (!newItem.title && newItem.item_id) {
+        // If only an ID is returned, refresh the list to get the complete item
+        handleRefreshMarketplaceItems();
+      } else {
+        // If we have the complete item data, add it to the list
+        setMarketplacePosts(prevItems => [newItem, ...prevItems]);
+      }
+      
+      setSnackbar({
+        open: true,
+        message: 'Item created successfully',
+        severity: 'success'
+      });
+    } else {
+      console.error('Invalid new item data received:', newItemData);
+      // Still refresh the list to ensure we have the latest data
+      handleRefreshMarketplaceItems();
+    }
+    setNewItemOpen(false);
+  };
+
+  const handleRefreshMarketplaceItems = async () => {
+    if (user?._id) {
+      setLoadingPosts(true);
+      try {
+        // Add timestamp to prevent caching
+        const timestamp = new Date().getTime();
+        const response = await axios.get(`/api/marketplace/items/user/${user._id}?_=${timestamp}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        setMarketplacePosts(response.data || []);
+        
+        setSnackbar({
+          open: true,
+          message: 'Items refreshed successfully',
+          severity: 'success'
+        });
+      } catch (err) {
+        console.error('Error refreshing marketplace items:', err);
+      } finally {
+        setLoadingPosts(false);
+      }
+    }
+  };
+
   // User Activity Tabs Section
   const renderUserActivity = () => {
     return (
@@ -420,9 +514,30 @@ const UserProfile = () => {
           border: '1px solid rgba(255, 255, 255, 0.5)'
         }}
       >
-        <Typography variant="h5" gutterBottom>
-          Your Activity
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h5" gutterBottom>
+            Your Activity
+          </Typography>
+          {tabValue === 0 && (
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Button 
+                variant="outlined" 
+                color="primary" 
+                onClick={handleRefreshMarketplaceItems}
+              >
+                Refresh Items
+              </Button>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                startIcon={<StoreIcon />}
+                onClick={handleCreateNewItem}
+              >
+                Create New Item
+              </Button>
+            </Box>
+          )}
+        </Box>
         
         <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
           <Tabs 
@@ -466,45 +581,49 @@ const UserProfile = () => {
                   <CircularProgress />
                 </Box>
               ) : marketplacePosts.length > 0 ? (
-                <Grid container spacing={3}>
+                <List>
                   {marketplacePosts.map((post) => (
-                    <Grid item xs={12} sm={6} md={4} key={post._id}>
-                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <CardMedia
-                          component="img"
-                          height="140"
-                          image={post.image || 'https://via.placeholder.com/300x140?text=No+Image'}
-                          alt={post.title}
-                        />
-                        <CardContent sx={{ flexGrow: 1 }}>
-                          <Typography variant="h6" component="div" gutterBottom noWrap>
-                            {post.title}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" paragraph>
-                            {post.description.length > 100 ? post.description.substring(0, 100) + '...' : post.description}
-                          </Typography>
-                          <Box sx={{ mt: 1, display: 'flex', justifyContent: 'space-between' }}>
-                            <Typography variant="h6" color="primary">
-                              ${post.price}
+                    <ListItem 
+                      key={post._id}
+                      divider
+                      sx={{ py: 2 }}
+                    >
+                      <ListItemAvatar>
+                        <Avatar 
+                          src={post.images && post.images.length > 0 ? post.images[0] : ''} 
+                          variant="rounded"
+                          sx={{ width: 60, height: 60 }}
+                        >
+                          {!post.images || post.images.length === 0 ? post.title.charAt(0) : null}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={post.title}
+                        secondary={
+                          <>
+                            <Typography component="span" variant="body2" color="text.primary">
+                              ${post.price} • {post.category}
                             </Typography>
-                            <Chip label={post.category} size="small" color="primary" variant="outlined" />
-                          </Box>
-                        </CardContent>
-                        <CardActions>
-                          <Button size="small" onClick={() => navigate(`/marketplace/item/${post._id}`)}>
-                            View
-                          </Button>
-                          <Button size="small" color="primary" onClick={() => navigate(`/marketplace/edit/${post._id}`)}>
-                            Edit
-                          </Button>
-                          <Button size="small" color="error" onClick={() => handleOpenDeleteDialog(post._id, 'marketplace')}>
-                            Delete
-                          </Button>
-                        </CardActions>
-                      </Card>
-                    </Grid>
+                            <br />
+                            {post.description.substring(0, 100)}
+                            {post.description.length > 100 ? '...' : ''}
+                          </>
+                        }
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton edge="end" onClick={() => handleViewItem(post)}>
+                          <PhotoCameraIcon />
+                        </IconButton>
+                        <IconButton edge="end" onClick={() => handleEditItem(post)}>
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton edge="end" color="error" onClick={() => handleOpenDeleteDialog(post._id, 'marketplace')}>
+                          <CancelIcon />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
                   ))}
-                </Grid>
+                </List>
               ) : (
                 <Box sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="body1" color="text.secondary" paragraph>
@@ -537,59 +656,49 @@ const UserProfile = () => {
                   <CircularProgress />
                 </Box>
               ) : lostFoundItems.length > 0 ? (
-                <Grid container spacing={3}>
+                <List>
                   {lostFoundItems.map((item) => (
-                    <Grid item xs={12} sm={6} md={4} key={item._id}>
-                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <Box 
-                          sx={{ 
-                            p: 1, 
-                            bgcolor: item.status === 'LOST' ? 'error.main' : 'success.main',
-                            color: 'white',
-                            textAlign: 'center'
-                          }}
+                    <ListItem 
+                      key={item._id}
+                      divider
+                      sx={{ py: 2 }}
+                    >
+                      <ListItemAvatar>
+                        <Avatar 
+                          src={item.image || 'https://via.placeholder.com/300x140?text=No+Image'} 
+                          variant="rounded"
+                          sx={{ width: 60, height: 60 }}
                         >
-                          <Typography variant="subtitle2">
-                            {item.status}
-                          </Typography>
-                        </Box>
-                        <CardMedia
-                          component="img"
-                          height="140"
-                          image={item.image || 'https://via.placeholder.com/300x140?text=No+Image'}
-                          alt={item.title}
-                        />
-                        <CardContent sx={{ flexGrow: 1 }}>
-                          <Typography variant="h6" component="div" gutterBottom noWrap>
-                            {item.title}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary" paragraph>
-                            {item.description.length > 100 ? item.description.substring(0, 100) + '...' : item.description}
-                          </Typography>
-                          <Box sx={{ mt: 1 }}>
-                            <Typography variant="body2">
-                              <strong>Location:</strong> {item.location}
+                          {item.status === 'LOST' ? 'L' : 'F'}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={item.title}
+                        secondary={
+                          <>
+                            <Typography component="span" variant="body2" color="text.primary">
+                              {item.status === 'LOST' ? 'Lost' : 'Found'}
                             </Typography>
-                            <Typography variant="body2">
-                              <strong>Date:</strong> {new Date(item.date).toLocaleDateString()}
-                            </Typography>
-                          </Box>
-                        </CardContent>
-                        <CardActions>
-                          <Button size="small" onClick={() => navigate(`/lost-found/item/${item._id}`)}>
-                            View
-                          </Button>
-                          <Button size="small" color="primary" onClick={() => navigate(`/lost-found/edit/${item._id}`)}>
-                            Edit
-                          </Button>
-                          <Button size="small" color="error" onClick={() => handleOpenDeleteDialog(item._id, 'lostfound')}>
-                            Delete
-                          </Button>
-                        </CardActions>
-                      </Card>
-                    </Grid>
+                            <br />
+                            {item.description.substring(0, 100)}
+                            {item.description.length > 100 ? '...' : ''}
+                          </>
+                        }
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton edge="end" onClick={() => handleViewItem(item)}>
+                          <PhotoCameraIcon />
+                        </IconButton>
+                        <IconButton edge="end" onClick={() => handleEditItem(item)}>
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton edge="end" color="error" onClick={() => handleOpenDeleteDialog(item._id, 'lostfound')}>
+                          <CancelIcon />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
                   ))}
-                </Grid>
+                </List>
               ) : (
                 <Box sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="body1" color="text.secondary" paragraph>
@@ -622,63 +731,48 @@ const UserProfile = () => {
                   <CircularProgress />
                 </Box>
               ) : rideRequests.length > 0 ? (
-                <Grid container spacing={3}>
+                <List>
                   {rideRequests.map((ride) => (
-                    <Grid item xs={12} sm={6} md={4} key={ride._id}>
-                      <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                        <Box 
-                          sx={{ 
-                            p: 1, 
-                            bgcolor: ride.type === 'OFFER' ? 'success.main' : 'info.main',
-                            color: 'white',
-                            textAlign: 'center'
-                          }}
+                    <ListItem 
+                      key={ride._id}
+                      divider
+                      sx={{ py: 2 }}
+                    >
+                      <ListItemAvatar>
+                        <Avatar 
+                          src={ride.type === 'OFFER' ? 'https://via.placeholder.com/300x140?text=Offer' : 'https://via.placeholder.com/300x140?text=Request'} 
+                          variant="rounded"
+                          sx={{ width: 60, height: 60 }}
                         >
-                          <Typography variant="subtitle2">
-                            {ride.type === 'OFFER' ? 'OFFERING RIDE' : 'REQUESTING RIDE'}
-                          </Typography>
-                        </Box>
-                        <CardContent sx={{ flexGrow: 1 }}>
-                          <Typography variant="h6" component="div" gutterBottom>
-                            {ride.origin} → {ride.destination}
-                          </Typography>
-                          <Typography variant="body2" paragraph>
-                            {new Date(ride.date).toLocaleDateString()} at {ride.time}
-                          </Typography>
-                          <Divider sx={{ my: 1 }} />
-                          <Grid container spacing={1}>
-                            <Grid item xs={6}>
-                              <Typography variant="body2">
-                                <strong>Type:</strong> {ride.type}
-                              </Typography>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Typography variant="body2">
-                                <strong>Seats:</strong> {ride.seats}
-                              </Typography>
-                            </Grid>
-                            <Grid item xs={12}>
-                              <Typography variant="body2">
-                                <strong>Price:</strong> ${ride.price}
-                              </Typography>
-                            </Grid>
-                          </Grid>
-                        </CardContent>
-                        <CardActions>
-                          <Button size="small" onClick={() => navigate(`/ride-booking/ride/${ride._id}`)}>
-                            View
-                          </Button>
-                          <Button size="small" color="primary" onClick={() => navigate(`/ride-booking/edit/${ride._id}`)}>
-                            Edit
-                          </Button>
-                          <Button size="small" color="error" onClick={() => handleOpenDeleteDialog(ride._id, 'ride')}>
-                            Delete
-                          </Button>
-                        </CardActions>
-                      </Card>
-                    </Grid>
+                          {ride.type === 'OFFER' ? 'O' : 'R'}
+                        </Avatar>
+                      </ListItemAvatar>
+                      <ListItemText
+                        primary={`${ride.origin} → ${ride.destination}`}
+                        secondary={
+                          <>
+                            <Typography component="span" variant="body2" color="text.primary">
+                              {new Date(ride.date).toLocaleDateString()} at {ride.time}
+                            </Typography>
+                            <br />
+                            {ride.type === 'OFFER' ? 'Offering Ride' : 'Requesting Ride'}
+                          </>
+                        }
+                      />
+                      <ListItemSecondaryAction>
+                        <IconButton edge="end" onClick={() => handleViewItem(ride)}>
+                          <PhotoCameraIcon />
+                        </IconButton>
+                        <IconButton edge="end" onClick={() => handleEditItem(ride)}>
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton edge="end" color="error" onClick={() => handleOpenDeleteDialog(ride._id, 'ride')}>
+                          <CancelIcon />
+                        </IconButton>
+                      </ListItemSecondaryAction>
+                    </ListItem>
                   ))}
-                </Grid>
+                </List>
               ) : (
                 <Box sx={{ textAlign: 'center', py: 3 }}>
                   <Typography variant="body1" color="text.secondary" paragraph>
@@ -698,6 +792,110 @@ const UserProfile = () => {
         </div>
       </Paper>
     );
+  };
+
+  const handleViewItem = (item) => {
+    setSelectedItem(item);
+    setItemDetailsOpen(true);
+  };
+
+  const handleEditItem = (item) => {
+    setSelectedItemForEdit(item);
+    setEditItemOpen(true);
+  };
+
+  const handleEditItemSuccess = (updatedItemData) => {
+    // Update the item in the list
+    // Handle different response data structures
+    const updatedItem = updatedItemData.item || updatedItemData;
+    
+    if (updatedItem && updatedItem._id) {
+      setMarketplacePosts(prevItems => 
+        prevItems.map(item => 
+          item._id === updatedItem._id ? updatedItem : item
+        )
+      );
+      
+      setEditItemOpen(false);
+      setSelectedItemForEdit(null);
+      
+      setSnackbar({
+        open: true,
+        message: 'Item updated successfully',
+        severity: 'success'
+      });
+    } else {
+      console.error('Invalid update data received:', updatedItemData);
+      setSnackbar({
+        open: true,
+        message: 'Error updating item. Please try again.',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleConfirmDeleteItem = async () => {
+    if (!itemToDelete) return;
+    
+    setDeletingItem(true);
+    setDeleteError('');
+    
+    try {
+      const token = localStorage.getItem('token');
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      await axios.delete(`/api/marketplace/items/${itemToDelete._id}`);
+      
+      // Update local state
+      setMarketplacePosts(prevItems => prevItems.filter(item => item._id !== itemToDelete._id));
+      
+      setConfirmDeleteOpen(false);
+      setItemToDelete(null);
+      
+      setSnackbar({
+        open: true,
+        message: 'Item deleted successfully',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error deleting item:', err);
+      setDeleteError('Failed to delete item. Please try again.');
+    } finally {
+      setDeletingItem(false);
+    }
+  };
+
+  const handleDeleteProfilePicture = async () => {
+    try {
+      setUploadingImage(true);
+      const response = await axios.delete(`/api/users/${user._id}/delete-profile-picture`);
+      
+      if (response.data) {
+        setProfileImage(null);
+        
+        // Update local user data
+        const userData = JSON.parse(localStorage.getItem('user'));
+        if (userData && userData.profile_picture) {
+          delete userData.profile_picture;
+          localStorage.setItem('user', JSON.stringify(userData));
+        }
+        
+        setSnackbar({
+          open: true,
+          message: 'Profile picture deleted successfully',
+          severity: 'success'
+        });
+      }
+    } catch (err) {
+      console.error('Error deleting profile picture:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to delete profile picture',
+        severity: 'error'
+      });
+    } finally {
+      setUploadingImage(false);
+    }
   };
 
   if (loading) {
@@ -775,26 +973,39 @@ const UserProfile = () => {
                       }} 
                     />
                   ) : (
-                    <IconButton
-                      color="primary"
-                      aria-label="upload picture"
-                      component="label"
-                      sx={{ 
-                        position: 'absolute', 
-                        bottom: 20, 
-                        right: 0, 
-                        backgroundColor: 'white',
-                        '&:hover': { backgroundColor: '#f5f5f5' }
-                      }}
-                    >
-                      <input 
-                        hidden 
-                        accept="image/*" 
-                        type="file" 
-                        onChange={handleProfileImageChange} 
-                      />
-                      <PhotoCameraIcon />
-                    </IconButton>
+                    <Box sx={{ position: 'absolute', bottom: 20, right: 0, display: 'flex' }}>
+                      {profileImage && (
+                        <IconButton
+                          color="error"
+                          aria-label="delete picture"
+                          sx={{ 
+                            mr: 1,
+                            backgroundColor: 'white',
+                            '&:hover': { backgroundColor: '#f5f5f5' }
+                          }}
+                          onClick={handleDeleteProfilePicture}
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      )}
+                      <IconButton
+                        color="primary"
+                        aria-label="upload picture"
+                        component="label"
+                        sx={{ 
+                          backgroundColor: 'white',
+                          '&:hover': { backgroundColor: '#f5f5f5' }
+                        }}
+                      >
+                        <input 
+                          hidden 
+                          accept="image/*" 
+                          type="file" 
+                          onChange={handleProfileImageChange} 
+                        />
+                        <PhotoCameraIcon />
+                      </IconButton>
+                    </Box>
                   )}
                 </Box>
                 <Typography variant="h5" sx={{ fontWeight: 600 }}>
@@ -1077,16 +1288,88 @@ const UserProfile = () => {
             </DialogActions>
           </Dialog>
           
+          {/* Item Details Dialog */}
+          {selectedItem && (
+            <MarketplaceItemDetailsDrawer
+              open={itemDetailsOpen}
+              item={selectedItem}
+              onClose={() => setItemDetailsOpen(false)}
+              onEditSuccess={handleEditItemSuccess}
+              onDeleteSuccess={(deletedItemId) => {
+                if (deletedItemId) {
+                  setMarketplacePosts(prevItems => prevItems.filter(item => item._id !== deletedItemId));
+                  setSnackbar({
+                    open: true,
+                    message: 'Item deleted successfully',
+                    severity: 'success'
+                  });
+                } else {
+                  // If we don't get a valid ID, refresh the list
+                  handleRefreshMarketplaceItems();
+                }
+              }}
+              showActions={true}
+            />
+          )}
+          
+          {/* Edit Item Dialog */}
+          {selectedItemForEdit && (
+            <MarketplaceItemForm
+              open={editItemOpen}
+              onClose={() => setEditItemOpen(false)}
+              item={selectedItemForEdit}
+              isEdit={true}
+              onSuccess={handleEditItemSuccess}
+            />
+          )}
+          
+          {/* Delete Confirmation Dialog */}
+          <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)}>
+            <DialogTitle>Confirm Deletion</DialogTitle>
+            <DialogContent>
+              <Typography>
+                Are you sure you want to delete "{itemToDelete?.title}"? This action cannot be undone.
+              </Typography>
+              {deleteError && (
+                <Alert severity="error" sx={{ mt: 2 }}>
+                  {deleteError}
+                </Alert>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setConfirmDeleteOpen(false)} disabled={deletingItem}>
+                Cancel
+              </Button>
+              <Button 
+                color="error" 
+                onClick={handleConfirmDeleteItem}
+                disabled={deletingItem}
+                startIcon={deletingItem ? <CircularProgress size={20} /> : null}
+              >
+                Delete
+              </Button>
+            </DialogActions>
+          </Dialog>
+          
+          {/* New Item Dialog */}
+          <MarketplaceItemForm
+            open={newItemOpen}
+            onClose={() => setNewItemOpen(false)}
+            isEdit={false}
+            onSuccess={handleNewItemSuccess}
+          />
+          
           {/* Snackbar for notifications */}
           <Snackbar
             open={snackbar.open}
-            autoHideDuration={6000}
+            autoHideDuration={5000}
             onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
             anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
           >
             <Alert 
               onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} 
-              severity={snackbar.severity}
+              severity={snackbar.severity} 
+              variant="filled"
               sx={{ width: '100%' }}
             >
               {snackbar.message}

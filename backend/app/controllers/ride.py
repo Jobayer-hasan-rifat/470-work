@@ -201,9 +201,121 @@ def create_share_ride():
 
 @ride_bp.route('/share', methods=['GET'])
 def get_share_rides():
-    # Get active share rides
+    """Get all active share rides (public feed)"""
     rides = list(db.share_rides.find({'status': 'active'}))
     for ride in rides:
         ride['_id'] = str(ride['_id'])
+        ride['user_id'] = str(ride['user_id'])
+    return jsonify(rides), 200
+
+@ride_bp.route('/share/user', methods=['GET'])
+@jwt_required()
+def get_user_share_rides():
+    """Get share rides posted by the currently logged-in user"""
+    user_id = get_jwt_identity()
+    rides = list(db.share_rides.find({'user_id': user_id}))
+    for ride in rides:
+        ride['_id'] = str(ride['_id'])
+        ride['user_id'] = str(ride['user_id'])
+    return jsonify(rides), 200
+
+@ride_bp.route('/share/<ride_id>', methods=['PUT'])
+@jwt_required()
+def update_share_ride(ride_id):
+    """Update a share ride (only by the owner or admin)"""
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    ride = db.share_rides.find_one({'_id': ObjectId(ride_id)})
+    if not ride:
+        return jsonify({'error': 'Ride not found'}), 404
+    is_owner = str(ride['user_id']) == user_id
+    # Check admin
+    user = db.users.find_one({'_id': ObjectId(user_id)})
+    is_admin = user and user.get('role') == 'admin'
+    if not (is_owner or is_admin):
+        return jsonify({'error': 'Unauthorized'}), 403
+    allowed_fields = ['from_location', 'to_location', 'date', 'time', 'vehicle_type', 'seats_available', 'price_per_seat', 'description', 'status']
+    update_data = {k: v for k, v in data.items() if k in allowed_fields}
+    update_data['updated_at'] = datetime.datetime.utcnow()
+    db.share_rides.update_one({'_id': ObjectId(ride_id)}, {'$set': update_data})
+    updated_ride = db.share_rides.find_one({'_id': ObjectId(ride_id)})
+    updated_ride['_id'] = str(updated_ride['_id'])
+    updated_ride['user_id'] = str(updated_ride['user_id'])
+    return jsonify(updated_ride), 200
+
+@ride_bp.route('/share/<ride_id>', methods=['DELETE'])
+@jwt_required()
+def delete_share_ride(ride_id):
+    """Delete a share ride (only by the owner or admin)"""
+    user_id = get_jwt_identity()
+    ride = db.share_rides.find_one({'_id': ObjectId(ride_id)})
+    if not ride:
+        return jsonify({'error': 'Ride not found'}), 404
+    is_owner = str(ride['user_id']) == user_id
+    user = db.users.find_one({'_id': ObjectId(user_id)})
+    is_admin = user and user.get('role') == 'admin'
+    if not (is_owner or is_admin):
+        return jsonify({'error': 'Unauthorized'}), 403
+    db.share_rides.delete_one({'_id': ObjectId(ride_id)})
+    return jsonify({'message': 'Share ride deleted successfully'}), 200
+
+# ADMIN: get all share rides (including inactive/removed)
+@ride_bp.route('/share/admin/all', methods=['GET'])
+@jwt_required()
+def admin_get_all_share_rides():
+    user_id = get_jwt_identity()
     
-    return jsonify(rides), 200 
+    # Check if user_id is a valid ObjectId
+    try:
+        if isinstance(user_id, str) and len(user_id) == 24:
+            user = db.users.find_one({'_id': ObjectId(user_id)})
+            if user and user.get('role') == 'admin':
+                # User is admin, proceed
+                pass
+            else:
+                # Check if user_id is 'admin' (special case for admin login)
+                if user_id == 'admin':
+                    # Allow admin user to proceed
+                    pass
+                else:
+                    return jsonify({'error': 'Admin privileges required'}), 403
+        else:
+            # Handle special case for admin login
+            if user_id == 'admin':
+                # Allow admin user to proceed
+                pass
+            else:
+                return jsonify({'error': 'Invalid user ID format'}), 400
+    except Exception as e:
+        # If user_id is 'admin', allow access
+        if user_id == 'admin':
+            # Allow admin user to proceed
+            pass
+        else:
+            return jsonify({'error': f'Error verifying admin: {str(e)}'}), 500
+    
+    # Fetch all ride shares
+    rides = list(db.share_rides.find())
+    
+    # Process ride data
+    for ride in rides:
+        ride['_id'] = str(ride['_id'])
+        ride['user_id'] = str(ride['user_id'])
+        
+        # Add user information
+        try:
+            ride_user = db.users.find_one({'_id': ObjectId(ride['user_id'])})
+            if ride_user:
+                ride['user'] = {
+                    'name': ride_user.get('name', 'Unknown'),
+                    'email': ride_user.get('email', 'No email'),
+                    '_id': str(ride_user['_id'])
+                }
+        except Exception:
+            # If user info can't be fetched, add placeholder
+            ride['user'] = {
+                'name': 'Unknown User',
+                'email': 'No email available'
+            }
+    
+    return jsonify(rides), 200

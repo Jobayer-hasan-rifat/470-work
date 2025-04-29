@@ -98,11 +98,15 @@ def create_item():
         }
         result = db.marketplace_items.insert_one(item_data)
         
-        # Clear all related caches
+        # Clear all related caches to ensure real-time updates
         cache.delete('view/api/marketplace/items')
         cache.delete(f'view/api/marketplace/user-items/{user_id}')
         cache.delete(f'view/api/marketplace/items/user/{user_id}')
         cache.delete_many('view/api/marketplace/*')
+        
+        # Clear admin dashboard cache to ensure item appears there immediately
+        cache.delete_many('view/api/admin/*')
+        cache.delete('admin_statistics')
         cache.delete_many('view/api/admin/*')  # Clear admin related caches
         
         return jsonify({"message": "Item created successfully", "item_id": str(result.inserted_id)}), 201

@@ -110,6 +110,7 @@ def get_pending_users():
 @admin_bp.route('/verified-users', methods=['GET'])
 @jwt_required()
 @admin_required
+@cache.cached(timeout=60)  # Cache for 60 seconds to reduce rate limit issues
 def get_verified_users():
     """Get all verified users"""
     try:
@@ -127,11 +128,13 @@ def get_verified_users():
                 if not user['id_card_photo'].startswith('/') and not user['id_card_photo'].startswith('http'):
                     user['id_card_photo'] = '/' + user['id_card_photo']
         
-        current_app.logger.debug(f"Found {len(verified_users)} verified users")
-        return jsonify(verified_users), 200
+        # Add cache control headers
+        response = jsonify(verified_users)
+        response.headers['Cache-Control'] = 'max-age=60'
+        return response, 200
     except Exception as e:
-        current_app.logger.error(f"Error getting verified users: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        current_app.logger.error(f"Error fetching verified users: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @admin_bp.route('/approve-user/<user_id>', methods=['PUT'])
 @jwt_required()
@@ -286,7 +289,7 @@ def edit_user(user_id):
 @admin_bp.route('/statistics', methods=['GET'])
 @jwt_required()
 @admin_required
-@cache.cached(timeout=300)  # Cache statistics for 5 minutes
+@cache.cached(timeout=60)  # Cache statistics for 1 minute instead of 5 to show more recent items
 def get_statistics():
     """Get platform statistics for admin dashboard"""
     try:
@@ -299,12 +302,18 @@ def get_statistics():
         total_rooms = db.rooms.count_documents({'active': True})
         total_bookings = db.bookings.count_documents({})
         
-        # Count marketplace items
-        total_items = db.items.count_documents({})
-        
+        # Count marketplace items - use marketplace_items collection instead of items
+        total_items = db.marketplace_items.count_documents({})
+
+        # Share ride statistics
+        total_share_rides = db.share_rides.count_documents({})
+        active_share_rides = db.share_rides.count_documents({'status': 'active'})
+        inactive_share_rides = db.share_rides.count_documents({'status': {'$ne': 'active'}})
+
         # Get recent activities
         recent_bookings = list(db.bookings.find().sort('created_at', -1).limit(5))
-        recent_items = list(db.items.find().sort('created_at', -1).limit(5))
+        # Use marketplace_items collection instead of items
+        recent_items = list(db.marketplace_items.find().sort('created_at', -1).limit(5))
         
         # Convert ObjectId to string
         for booking in recent_bookings:
@@ -315,8 +324,18 @@ def get_statistics():
         for item in recent_items:
             item['_id'] = str(item['_id'])
             item['user_id'] = str(item['user_id'])
+            
+            # Add user details to items
+            user = db.users.find_one({'_id': ObjectId(item['user_id'])})
+            if user:
+                item['seller'] = {
+                    'id': str(user['_id']),
+                    'name': user.get('name', 'Unknown'),
+                    'email': user.get('email', '')
+                }
         
-        return jsonify({
+        # Add cache control headers
+        response = jsonify({
             'users': {
                 'total': total_users,
                 'verified': verified_users,
@@ -331,10 +350,17 @@ def get_statistics():
             'marketplace': {
                 'total_items': total_items
             },
+            'share_rides': {
+                'total': total_share_rides,
+                'active': active_share_rides,
+                'inactive': inactive_share_rides
+            },
             'recent_activities': {
                 'bookings': recent_bookings,
                 'items': recent_items
             }
-        }), 200
+        })
+        response.headers['Cache-Control'] = 'max-age=60'
+        return response, 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500 

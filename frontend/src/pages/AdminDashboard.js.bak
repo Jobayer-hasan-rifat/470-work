@@ -72,17 +72,6 @@ const AdminDashboard = () => {
   const [userToDelete, setUserToDelete] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [refreshDebounce, setRefreshDebounce] = useState(false);
-  // Cache timestamps
-  const [lastFetched, setLastFetched] = useState({
-    users: 0,
-    pending: 0,
-    stats: 0,
-    marketplace: 0,
-    rideshare: 0
-  });
-  // Retry state for 429 errors
-  const [retryInfo, setRetryInfo] = useState({ type: '', show: false });
-  const CACHE_WINDOW = 30 * 1000; // 30 seconds
 
   // Handler to close edit drawer/modal
   const handleEditUser = (user) => {
@@ -212,219 +201,12 @@ const AdminDashboard = () => {
   const [deleteRideShareConfirmOpen, setDeleteRideShareConfirmOpen] = useState(false);
   const [rideShareToDelete, setRideShareToDelete] = useState(null);
 
-  // Fetch ride share data
-  const fetchRideShareData = async (force = false) => {
-    const now = Date.now();
-    if (!force && now - lastFetched.rideshare < CACHE_WINDOW) return;
-    if (refreshDebounce) return;
-    setRefreshDebounce(true);
-    try {
-      setLoading(true);
-      const adminToken = localStorage.getItem('adminToken');
-      if (!adminToken) throw new Error('Admin authentication required');
-      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-      const timestamp = new Date().getTime();
-      // Use the correct API endpoint for admin to get all ride shares
-      const response = await axiosGetWithRetry(`/api/ride/share/admin/all?_=${timestamp}`);
-      
-      // Process the data to include user information
-      const ridesWithUserInfo = await Promise.all(response.data.map(async (ride) => {
-        try {
-          // Get user details for each ride
-          const userResponse = await axios.get(`/api/admin/user/${ride.user_id}`);
-          return {
-            ...ride,
-            user: userResponse.data
-          };
-        } catch (error) {
-          console.error(`Error fetching user info for ride ${ride._id}:`, error);
-          return ride;
-        }
-      }));
-      
-      setRideShareItems(ridesWithUserInfo || []);
-      setLastFetched(prev => ({ ...prev, rideshare: Date.now() }));
-      
-      // Update stats with the new ride share data
-      setStats(prev => ({
-        ...prev,
-        rideshare: {
-          total_posts: ridesWithUserInfo.length || 0,
-          active: ridesWithUserInfo.filter(ride => ride.status === 'active').length || 0,
-          inactive: ridesWithUserInfo.filter(ride => ride.status !== 'active').length || 0
-        },
-        recent_activities: {
-          ...prev.recent_activities,
-          rideshare: ridesWithUserInfo.slice(0, 5) || []
-        }
-      }));
-    } catch (err) {
-      console.error('Error fetching ride share posts:', err);
-      let errorMsg = err.response?.data?.error || err.message;
-      if (err.response?.status === 429) {
-        errorMsg = 'Too many requests. Please wait a moment and try again.';
-        setRetryInfo({ type: 'rideshare', show: true });
-        setTimeout(() => {
-          setRetryInfo({ type: '', show: false });
-          fetchRideShareData(true);
-        }, 10000);
-      }
-      setSnackbar({
-        open: true,
-        message: errorMsg,
-        severity: err.response?.status === 429 ? 'warning' : 'error',
-        action: err.response?.status === 429 ? (
-          <Button color="inherit" size="small" onClick={() => fetchRideShareData(true)}>
-            Retry
-          </Button>
-        ) : undefined
-      });
-      setRideShareItems([]);
-    } finally {
-      setLoading(false);
-      setRefreshDebounce(false);
-    }
-  };
-
-  // Handlers for ride share edit/delete
-  const handleEditRideShare = (item) => {
-    setEditRideShareData(item);
-    setEditRideShareOpen(true);
-  };
-  
-  const handleEditRideShareClose = () => {
-    setEditRideShareOpen(false);
-    setEditRideShareData(null);
-  };
-  
-  const handleDeleteRideShare = (item) => {
-    setRideShareToDelete(item);
-    setDeleteRideShareConfirmOpen(true);
-  };
-  
-  const handleDeleteRideShareClose = () => {
-    setDeleteRideShareConfirmOpen(false);
-    setRideShareToDelete(null);
-  };
-  
-  const handleDeleteRideShareConfirm = async () => {
-    if (!rideShareToDelete) return;
-    setActionLoading(true);
-    try {
-      const adminToken = localStorage.getItem('adminToken');
-      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-      // Use the correct API endpoint for deleting ride shares
-      const response = await axios.delete(`/api/ride/share/${rideShareToDelete._id}`);
-      
-      setSnackbar({
-        open: true,
-        message: response.data.message || 'Ride share post deleted successfully',
-        severity: 'success'
-      });
-      
-      // Update the UI immediately
-      setRideShareItems(prev => prev.filter(item => item._id !== rideShareToDelete._id));
-      
-      // Update stats
-      setStats(prev => {
-        const isActive = rideShareToDelete.status === 'active';
-        return {
-          ...prev,
-          rideshare: {
-            ...prev.rideshare,
-            total_posts: (prev.rideshare?.total_posts || 0) - 1,
-            active: isActive ? (prev.rideshare?.active || 0) - 1 : (prev.rideshare?.active || 0),
-            inactive: !isActive ? (prev.rideshare?.inactive || 0) - 1 : (prev.rideshare?.inactive || 0)
-          },
-          recent_activities: {
-            ...prev.recent_activities,
-            rideshare: prev.recent_activities.rideshare?.filter(item => item._id !== rideShareToDelete._id) || []
-          }
-        };
-      });
-      
-      setDeleteRideShareConfirmOpen(false);
-      setRideShareToDelete(null);
-      
-      // Refresh data to ensure consistency
-      await fetchRideShareData(true);
-    } catch (err) {
-      console.error('Error deleting ride share:', err);
-      setSnackbar({
-        open: true,
-        message: err.response?.data?.error || err.message,
-        severity: 'error'
-      });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-  
-  // Handler for saving edited ride share
-  const handleEditRideShareSave = async () => {
-    if (!editRideShareData) return;
-    setActionLoading(true);
-    try {
-      const adminToken = localStorage.getItem('adminToken');
-      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-      
-      // Use the correct API endpoint for updating ride shares
-      const response = await axios.put(`/api/ride/share/${editRideShareData._id}`, editRideShareData);
-      
-      setSnackbar({
-        open: true,
-        message: 'Ride share post updated successfully',
-        severity: 'success'
-      });
-      
-      // Update the UI immediately
-      setRideShareItems(prevItems =>
-        prevItems.map(item =>
-          item._id === editRideShareData._id ? { ...item, ...editRideShareData } : item
-        )
-      );
-      
-      // Update recent activities if needed
-      setStats(prev => ({
-        ...prev,
-        recent_activities: {
-          ...prev.recent_activities,
-          rideshare: prev.recent_activities.rideshare?.map(item =>
-            item._id === editRideShareData._id ? { ...item, ...editRideShareData } : item
-          ) || []
-        }
-      }));
-      
-      setEditRideShareOpen(false);
-      setEditRideShareData(null);
-      
-      // Refresh data to ensure consistency
-      await fetchRideShareData(true);
-    } catch (err) {
-      console.error('Error updating ride share:', err);
-      setSnackbar({
-        open: true,
-        message: `Failed to update ride share: ${err.response?.data?.error || err.message}`,
-        severity: 'error'
-      });
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  // Call fetchRideShareData when needed (e.g., on mount or when switching views)
-  useEffect(() => {
-    if (activeView === 'rideshare') fetchRideShareData();
-    if (activeView === 'marketplace') fetchMarketplaceData();
-    // Add similar logic for users, pending, and stats if needed
-  }, [activeView]);
-
   // Data fetchers (stub implementations)
-  const fetchMarketplaceData = async (force = false) => {
-    const now = Date.now();
-    if (!force && now - lastFetched.marketplace < CACHE_WINDOW) return;
-    if (refreshDebounce) return;
+  const fetchMarketplaceData = async () => {
+    if (refreshDebounce) return; // Prevent rapid refresh
     setRefreshDebounce(true);
+    setTimeout(() => setRefreshDebounce(false), 2000); // 2s debounce
+
     try {
       setLoading(true);
       const adminToken = localStorage.getItem('adminToken');
@@ -441,44 +223,81 @@ const AdminDashboard = () => {
       const timestamp = new Date().getTime();
       const response = await axiosGetWithRetry(`/api/marketplace/items?_=${timestamp}`);
       setMarketplaceItems(response.data || []);
-      setLastFetched(prev => ({ ...prev, marketplace: Date.now() }));
       
       // Update stats with the new marketplace data
       setStats(prev => ({
         ...prev,
         marketplace: {
+          ...prev.marketplace,
           total_items: response.data?.length || 0
         },
         recent_activities: {
           ...prev.recent_activities,
-          items: response.data?.slice(0, 5) || [] // Show only 5 most recent items
+          items: response.data?.slice(0, 5) || []
         }
       }));
     } catch (err) {
       console.error('Error fetching marketplace items:', err);
       let errorMsg = err.response?.data?.error || err.message;
-      if (err.response?.status === 429) {
-        errorMsg = 'Too many requests. Please wait a moment and try again.';
-        setRetryInfo({ type: 'marketplace', show: true });
-        setTimeout(() => {
-          setRetryInfo({ type: '', show: false });
-          fetchMarketplaceData(true);
-        }, 10000); // auto-retry after 10s
-      }
+      if (err.response?.status === 429) errorMsg = 'Too many requests. Please wait a moment and try again.';
       setSnackbar({
         open: true,
         message: errorMsg,
-        severity: err.response?.status === 429 ? 'warning' : 'error',
-        action: err.response?.status === 429 ? (
-          <Button color="inherit" size="small" onClick={() => fetchMarketplaceData(true)}>
-            Retry
-          </Button>
-        ) : undefined
+        severity: err.response?.status === 429 ? 'warning' : 'error'
       });
       setMarketplaceItems([]);
     } finally {
       setLoading(false);
-      setRefreshDebounce(false);
+    }
+  };
+
+  // Fetch ride share data
+  const fetchRideShareData = async () => {
+    if (refreshDebounce) return; // Prevent rapid refresh
+    setRefreshDebounce(true);
+    setTimeout(() => setRefreshDebounce(false), 2000); // 2s debounce
+
+    try {
+      setLoading(true);
+      const adminToken = localStorage.getItem('adminToken');
+      const adminInfoStr = localStorage.getItem('adminInfo');
+      
+      if (!adminToken || !adminInfoStr) {
+        throw new Error('Admin authentication required');
+      }
+      
+      // Set the authorization header
+      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
+      
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axiosGetWithRetry(`/api/ride/share?_=${timestamp}`);
+      setRideShareItems(response.data || []);
+      
+      // Update stats with the new ride share data
+      setStats(prev => ({
+        ...prev,
+        rideshare: {
+          ...prev.rideshare,
+          total_items: response.data?.length || 0
+        },
+        recent_activities: {
+          ...prev.recent_activities,
+          rideshares: response.data?.slice(0, 5) || []
+        }
+      }));
+    } catch (err) {
+      console.error('Error fetching ride share items:', err);
+      let errorMsg = err.response?.data?.error || err.message;
+      if (err.response?.status === 429) errorMsg = 'Too many requests. Please wait a moment and try again.';
+      setSnackbar({
+        open: true,
+        message: errorMsg,
+        severity: err.response?.status === 429 ? 'warning' : 'error'
+      });
+      setRideShareItems([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -493,17 +312,31 @@ const AdminDashboard = () => {
 
   // Handlers for editing and deleting marketplace items
 
-  // Marketplace Edit and Delete handlers
+  // Marketplace edit/delete handlers
   const [editMarketplaceOpen, setEditMarketplaceOpen] = useState(false);
   const [editMarketplaceData, setEditMarketplaceData] = useState(null);
   const [deleteMarketplaceOpen, setDeleteMarketplaceOpen] = useState(false);
   const [marketplaceToDelete, setMarketplaceToDelete] = useState(null);
-  const [marketplaceActionLoading, setMarketplaceActionLoading] = useState(''); // item id for which action is loading
+  const [marketplaceActionLoading, setMarketplaceActionLoading] = useState('');
+
+  // Ride share edit/delete handlers
+  const [rideShareActionLoading, setRideShareActionLoading] = useState(''); // item id for which action is loading
 
   const handleEditMarketplaceItem = (item) => {
     setEditMarketplaceData(item);
     setEditMarketplaceOpen(true);
   };
+
+  const handleEditRideShareItem = (item) => {
+    setEditRideShareData(item);
+    setEditRideShareOpen(true);
+  };
+
+  const handleDeleteRideShareItem = (item) => {
+    setRideShareToDelete(item);
+    setDeleteRideShareConfirmOpen(true);
+  };
+
   const handleEditMarketplaceClose = () => {
     setEditMarketplaceOpen(false);
     setEditMarketplaceData(null);
@@ -1141,7 +974,7 @@ const AdminDashboard = () => {
           <ListItemIcon>
             <MeetingRoomIcon color={activeView === 'rideshare' ? 'primary' : 'inherit'} />
           </ListItemIcon>
-          <ListItemText primary="Manage Ride Share" />
+          <ListItemText primary="Manage Ride Share (Demo)" />
         </ListItem>
       </List>
       <Divider />
@@ -1175,81 +1008,62 @@ const AdminDashboard = () => {
         </ListItem>
       </List>
     </div>
-  );
 
-  // Render different content based on active view
-  const renderContent = () => {
-    if (activeView === 'rideshare') {
+        {/* Delete Ride Share Confirmation Dialog */}
+        <Dialog open={deleteRideShareConfirmOpen} onClose={handleDeleteRideShareClose}>
+          <DialogTitle>Confirm Delete</DialogTitle>
+          <DialogContent>
+            <Typography>Are you sure you want to delete this ride share post?</Typography>
+            {rideShareToDelete && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                {rideShareToDelete.from_location} → {rideShareToDelete.to_location} ({rideShareToDelete.date})
+              </Typography>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={handleDeleteRideShareClose} color="primary">
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleDeleteRideShareConfirm} 
+              color="error" 
+              variant="contained"
+              disabled={rideShareActionLoading !== ''}
+            >
+              {rideShareActionLoading ? <CircularProgress size={24} /> : 'Delete'}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      </Box>
+    );
+  } 
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  switch (activeView) {
+    case 'dashboard':
       return (
         <Box sx={{ mt: 2 }}>
-          <Typography variant="h5" sx={{ mb: 3 }}>Manage Ride Share</Typography>
-          <RideShareList 
-            adminView
-            items={rideShareItems}
-            onEdit={handleEditRideShare}
-            onDelete={handleDeleteRideShare}
-          />
-          {/* Edit Ride Share Dialog */}
-          <Dialog open={editRideShareOpen} onClose={handleEditRideShareClose} maxWidth="sm" fullWidth>
-            <DialogTitle>Edit Ride Share Post</DialogTitle>
-            <DialogContent>
-              {/* Add form fields for editing ride share post here */}
-              <TextField
-                margin="normal"
-                label="Title"
-                fullWidth
-                value={editRideShareData?.title || ''}
-                onChange={e => setEditRideShareData({ ...editRideShareData, title: e.target.value })}
-              />
-              {/* Add other fields as needed */}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleEditRideShareClose}>Cancel</Button>
-              <Button variant="contained" color="primary" onClick={async () => {
-                setActionLoading(true);
-                try {
-                  const adminToken = localStorage.getItem('adminToken');
-                  axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-                  const response = await axios.put(`/api/rideshare/edit/${editRideShareData._id}`, editRideShareData);
-                  setSnackbar({
-                    open: true,
-                    message: response.data.message || 'Ride share post updated',
-                    severity: 'success'
-                  });
-                  setEditRideShareOpen(false);
-                  setEditRideShareData(null);
-                  await fetchRideShareData();
-                } catch (err) {
-                  setSnackbar({
-                    open: true,
-                    message: err.response?.data?.error || err.message,
-                    severity: 'error'
-                  });
-                } finally {
-                  setActionLoading(false);
-                }
-              }}>Save</Button>
-            </DialogActions>
-          </Dialog>
-          {/* Delete Ride Share Confirmation Dialog */}
-          <Dialog open={deleteRideShareConfirmOpen} onClose={handleDeleteRideShareClose}>
-            <DialogTitle>Delete Ride Share Post</DialogTitle>
-            <DialogContent>
-              Are you sure you want to delete this ride share post?
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleDeleteRideShareClose}>Cancel</Button>
-              <Button color="error" variant="contained" onClick={handleDeleteRideShareConfirm}>Delete</Button>
-            </DialogActions>
-          </Dialog>
-        </Box>
-      );
-    }
-    if (loading) {
-      return (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 8 }}>
-          <CircularProgress />
-        </Box>
+          <Typography variant="h5" sx={{ mb: 3 }}>Dashboard Overview</Typography>
+          
+          {/* Stats Cards */}
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} sm={6} md={4}>
+              <Card sx={{ backgroundColor: '#e3f2fd', borderRadius: '12px', height: '100%' }}>
+                <CardContent>
+                  <Typography variant="h6" color="#1565c0">Total Users</Typography>
+                  <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.users.total}</Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <GroupIcon color="primary" />
+                    <Typography variant="body2" sx={{ ml: 1 }}>Registered accounts</Typography>
+                  </Box>
+                </CardContent>
+              </Card>
       );
     }
 
@@ -1299,18 +1113,6 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Card sx={{ backgroundColor: '#e8f5e9', borderRadius: '12px', height: '100%' }}>
-                  <CardContent>
-                    <Typography variant="h6" color="#388e3c">Ride Share Posts</Typography>
-                    <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.rideshare?.total_posts || 0}</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <DirectionsBusIcon color="success" />
-                      <Typography variant="body2" sx={{ ml: 1 }}>Active posts</Typography>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
             </Grid>
 
             {/* Recent activities section */}
@@ -1339,27 +1141,6 @@ const AdminDashboard = () => {
                     </List>
                   ) : (
                     <Typography variant="body2" color="text.secondary">No recent marketplace items</Typography>
-                  )}
-                  <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" sx={{ mb: 1 }}>Latest Ride Share Posts</Typography>
-                  {safeStats.recent_activities.rideshare && safeStats.recent_activities.rideshare.length > 0 ? (
-                    <List sx={{ width: '100%' }}>
-                      {safeStats.recent_activities.rideshare.map((item) => (
-                        <ListItem key={item._id} divider>
-                          <ListItemAvatar>
-                            <Avatar sx={{ bgcolor: '#388e3c' }}>
-                              <DirectionsBusIcon />
-                            </Avatar>
-                          </ListItemAvatar>
-                          <ListItemText
-                            primary={item.title}
-                            secondary={`From: ${item.origin} → To: ${item.destination}`}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">No recent ride share posts</Typography>
                   )}
                 </Paper>
               </Grid>
@@ -1650,162 +1431,12 @@ const AdminDashboard = () => {
       case 'rideshare':
         return (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="h5" sx={{ mb: 3 }}>Manage Ride Share</Typography>
+            <Typography variant="h5" sx={{ mb: 3 }}>Manage Ride Share (Demo)</Typography>
             <Paper sx={{ p: 3, borderRadius: '12px' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  Ride Share Posts ({rideShareItems.length})
-                </Typography>
-                <Button
-                  variant="outlined"
-                  color="primary"
-                  onClick={() => fetchRideShareData(true)}
-                  disabled={actionLoading !== ''}
-                  size="small"
-                >
-                  Refresh
-                </Button>
-              </Box>
-              <Divider sx={{ mb: 2 }} />
-              
-              {loading ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-                  <CircularProgress />
-                </Box>
-              ) : rideShareItems.length > 0 ? (
-                <RideShareList
-                  adminView={true}
-                  items={rideShareItems}
-                  onEdit={handleEditRideShare}
-                  onDelete={handleDeleteRideShare}
-                />
-              ) : (
-                <Typography variant="body1" align="center" sx={{ py: 3 }}>
-                  No ride share posts found
-                </Typography>
-              )}
+              <Typography variant="body1" align="center" sx={{ py: 3 }}>
+                Ride Share management functionality will be implemented in another module.
+              </Typography>
             </Paper>
-            
-            {/* Edit Ride Share Dialog */}
-            <Dialog open={editRideShareOpen} onClose={handleEditRideShareClose} maxWidth="sm" fullWidth>
-              <DialogTitle>Edit Ride Share Post</DialogTitle>
-              <DialogContent>
-                {editRideShareData && (
-                  <Box sx={{ mt: 2 }}>
-                    <TextField
-                      margin="normal"
-                      label="From Location"
-                      fullWidth
-                      value={editRideShareData?.from_location || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, from_location: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="To Location"
-                      fullWidth
-                      value={editRideShareData?.to_location || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, to_location: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Date"
-                      fullWidth
-                      value={editRideShareData?.date || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, date: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Time"
-                      fullWidth
-                      value={editRideShareData?.time || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, time: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Vehicle Type"
-                      fullWidth
-                      value={editRideShareData?.vehicle_type || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, vehicle_type: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Seats Available"
-                      type="number"
-                      fullWidth
-                      value={editRideShareData?.seats_available || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, seats_available: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Price per Seat"
-                      fullWidth
-                      value={editRideShareData?.price_per_seat || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, price_per_seat: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Description"
-                      fullWidth
-                      multiline
-                      rows={3}
-                      value={editRideShareData?.description || ''}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, description: e.target.value })}
-                    />
-                    <TextField
-                      margin="normal"
-                      label="Status"
-                      select
-                      fullWidth
-                      value={editRideShareData?.status || 'active'}
-                      onChange={e => setEditRideShareData({ ...editRideShareData, status: e.target.value })}
-                      SelectProps={{
-                        native: true,
-                      }}
-                    >
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                      <option value="completed">Completed</option>
-                      <option value="cancelled">Cancelled</option>
-                    </TextField>
-                  </Box>
-                )}
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={handleEditRideShareClose}>Cancel</Button>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleEditRideShareSave}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Save'}
-                </Button>
-              </DialogActions>
-            </Dialog>
-            
-            {/* Delete Ride Share Confirmation Dialog */}
-            <Dialog open={deleteRideShareConfirmOpen} onClose={handleDeleteRideShareClose}>
-              <DialogTitle>Delete Ride Share Post</DialogTitle>
-              <DialogContent>
-                <Typography>
-                  Are you sure you want to delete this ride share post from {rideShareToDelete?.from_location} to {rideShareToDelete?.to_location}?
-                </Typography>
-                <Typography variant="body2" color="error" sx={{ mt: 2 }}>
-                  This action cannot be undone. The post will be permanently removed from the system.
-                </Typography>
-              </DialogContent>
-              <DialogActions>
-                <Button onClick={handleDeleteRideShareClose}>Cancel</Button>
-                <Button
-                  color="error"
-                  variant="contained"
-                  onClick={handleDeleteRideShareConfirm}
-                  disabled={actionLoading}
-                >
-                  {actionLoading ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
-                </Button>
-              </DialogActions>
-            </Dialog>
           </Box>
         );
 

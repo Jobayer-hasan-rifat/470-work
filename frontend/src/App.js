@@ -17,6 +17,7 @@ const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Marketplace = lazy(() => import('./pages/Marketplace'));
+const Payment = lazy(() => import('./pages/Payment'));
 const LostFound = lazy(() => import('./pages/LostFound'));
 const RideBooking = lazy(() => import('./pages/RideBooking'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
@@ -123,6 +124,11 @@ function App() {
             <Route path="/marketplace" element={
               <SharedRoute>
                 <Marketplace />
+              </SharedRoute>
+            } />
+            <Route path="/payment" element={
+              <SharedRoute>
+                <Payment />
               </SharedRoute>
             } />
             <Route path="/lost-found" element={

@@ -40,13 +40,40 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import LogoutIcon from '@mui/icons-material/Logout';
 import DeleteIcon from '@mui/icons-material/Delete';
+import MessageIcon from '@mui/icons-material/Message';
+import AddIcon from '@mui/icons-material/Add';
+import Badge from '@mui/material/Badge';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import '../AppBackgrounds.css';
 import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDrawer';
+import RideShareList from '../components/RideShareList';
 import MarketplaceItemForm from '../components/MarketplaceItemForm';
+import MessageCenter from '../components/MessageCenter';
 
 const UserProfile = () => {
+  // ...existing state hooks...
+  // Debounce state for actions
+  const [actionDebounce, setActionDebounce] = useState(false);
+
+  // View item details (best practice: open details drawer)
+  const handleViewItem = (item) => {
+    if (actionDebounce) return;
+    setActionDebounce(true);
+    setTimeout(() => setActionDebounce(false), 800); // 800ms debounce
+    setSelectedItem(item);
+    setItemDetailsOpen(true);
+  };
+
+  // Edit item (best practice: open edit dialog with item)
+  const handleEditItem = (item) => {
+    if (actionDebounce) return;
+    setActionDebounce(true);
+    setTimeout(() => setActionDebounce(false), 800);
+    setSelectedItemForEdit(item);
+    setEditItemOpen(true);
+  };
+
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +84,7 @@ const UserProfile = () => {
   const [lostFoundItems, setLostFoundItems] = useState([]);
   const [rideRequests, setRideRequests] = useState([]);
   const [tabValue, setTabValue] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [updatedUser, setUpdatedUser] = useState({});
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -79,6 +107,26 @@ const UserProfile = () => {
       document.body.classList.remove('user-profile-page');
     };
   }, []);
+
+  // Check for unread messages
+  useEffect(() => {
+    const checkUnreadMessages = async () => {
+      if (!user?.id) return;
+      
+      try {
+        const response = await axios.get(`http://localhost:5000/api/messages/unread/${user.id}`);
+        setMessageCount(response.data.count);
+      } catch (error) {
+        console.error('Error fetching unread messages:', error);
+      }
+    };
+    
+    checkUnreadMessages();
+    // Set up polling for new messages every minute
+    const intervalId = setInterval(checkUnreadMessages, 60000);
+    
+    return () => clearInterval(intervalId);
+  }, [user?.id]);
 
   // Load user data from localStorage and fetch additional details from API
   useEffect(() => {
@@ -495,346 +543,173 @@ const UserProfile = () => {
         console.error('Error refreshing marketplace items:', err);
       } finally {
         setLoadingPosts(false);
-      }
     }
-  };
+  }
+};
 
-  // User Activity Tabs Section
-  const renderUserActivity = () => {
-    return (
-      <Paper 
-        elevation={3} 
-        sx={{ 
-          p: 3, 
-          mt: 4,
-          borderRadius: '16px',
-          background: 'rgba(255, 255, 255, 0.85)',
-          backdropFilter: 'blur(8px)',
-          boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
-          border: '1px solid rgba(255, 255, 255, 0.5)'
-        }}
-      >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h5" gutterBottom>
-            Your Activity
-          </Typography>
-          {tabValue === 0 && (
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button 
-                variant="outlined" 
-                color="primary" 
-                onClick={handleRefreshMarketplaceItems}
-              >
-                Refresh Items
-              </Button>
-              <Button 
-                variant="contained" 
-                color="primary" 
-                startIcon={<StoreIcon />}
-                onClick={handleCreateNewItem}
-              >
-                Create New Item
-              </Button>
-            </Box>
-          )}
-        </Box>
-        
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs 
-            value={tabValue} 
-            onChange={handleTabChange} 
-            aria-label="user activity tabs"
-            sx={{ mb: 2 }}
-          >
-            <Tab 
-              icon={<StoreIcon />} 
-              label="Marketplace" 
-              id="tab-0" 
-              aria-controls="tabpanel-0" 
-            />
-            <Tab 
-              icon={<HelpOutlineIcon />} 
-              label="Lost & Found" 
-              id="tab-1" 
-              aria-controls="tabpanel-1" 
-            />
-            <Tab 
-              icon={<DirectionsBusIcon />} 
-              label="Ride Sharing" 
-              id="tab-2" 
-              aria-controls="tabpanel-2" 
-            />
-          </Tabs>
-        </Box>
-        
-        {/* Marketplace Tab */}
-        <div
-          role="tabpanel"
-          hidden={tabValue !== 0}
-          id="tabpanel-0"
-          aria-labelledby="tab-0"
-        >
-          {tabValue === 0 && (
-            <>
-              {loadingPosts ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                  <CircularProgress />
-                </Box>
-              ) : marketplacePosts.length > 0 ? (
-                <List>
-                  {marketplacePosts.map((post) => (
-                    <ListItem 
-                      key={post._id}
-                      divider
-                      sx={{ py: 2 }}
-                    >
-                      <ListItemAvatar>
-                        <Avatar 
-                          src={post.images && post.images.length > 0 ? post.images[0] : ''} 
-                          variant="rounded"
-                          sx={{ width: 60, height: 60 }}
-                        >
-                          {!post.images || post.images.length === 0 ? post.title.charAt(0) : null}
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={post.title}
-                        secondary={
-                          <>
-                            <Typography component="span" variant="body2" color="text.primary">
-                              ${post.price} • {post.category}
-                            </Typography>
-                            <br />
-                            {post.description.substring(0, 100)}
-                            {post.description.length > 100 ? '...' : ''}
-                          </>
-                        }
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton edge="end" onClick={() => handleViewItem(post)}>
-                          <PhotoCameraIcon />
-                        </IconButton>
-                        <IconButton edge="end" onClick={() => handleEditItem(post)}>
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton edge="end" color="error" onClick={() => handleOpenDeleteDialog(post._id, 'marketplace')}>
-                          <CancelIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                  ))}
-                </List>
-              ) : (
-                <Box sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="body1" color="text.secondary" paragraph>
-                    You haven't posted any items in the marketplace yet.
-                  </Typography>
-                  <Button 
-                    variant="contained" 
-                    startIcon={<StoreIcon />}
-                    onClick={() => navigate('/marketplace/sell')}
-                  >
-                    Create Your First Post
-                  </Button>
-                </Box>
-              )}
-            </>
-          )}
-        </div>
-        
-        {/* Lost & Found Tab */}
-        <div
-          role="tabpanel"
-          hidden={tabValue !== 1}
-          id="tabpanel-1"
-          aria-labelledby="tab-1"
-        >
-          {tabValue === 1 && (
-            <>
-              {loadingPosts ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                  <CircularProgress />
-                </Box>
-              ) : lostFoundItems.length > 0 ? (
-                <List>
-                  {lostFoundItems.map((item) => (
-                    <ListItem 
-                      key={item._id}
-                      divider
-                      sx={{ py: 2 }}
-                    >
-                      <ListItemAvatar>
-                        <Avatar 
-                          src={item.image || 'https://via.placeholder.com/300x140?text=No+Image'} 
-                          variant="rounded"
-                          sx={{ width: 60, height: 60 }}
-                        >
-                          {item.status === 'LOST' ? 'L' : 'F'}
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={item.title}
-                        secondary={
-                          <>
-                            <Typography component="span" variant="body2" color="text.primary">
-                              {item.status === 'LOST' ? 'Lost' : 'Found'}
-                            </Typography>
-                            <br />
-                            {item.description.substring(0, 100)}
-                            {item.description.length > 100 ? '...' : ''}
-                          </>
-                        }
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton edge="end" onClick={() => handleViewItem(item)}>
-                          <PhotoCameraIcon />
-                        </IconButton>
-                        <IconButton edge="end" onClick={() => handleEditItem(item)}>
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton edge="end" color="error" onClick={() => handleOpenDeleteDialog(item._id, 'lostfound')}>
-                          <CancelIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                  ))}
-                </List>
-              ) : (
-                <Box sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="body1" color="text.secondary" paragraph>
-                    You haven't reported any lost or found items yet.
-                  </Typography>
-                  <Button 
-                    variant="contained" 
-                    startIcon={<HelpOutlineIcon />}
-                    onClick={() => navigate('/lost-found/report')}
-                  >
-                    Report Lost or Found Item
-                  </Button>
-                </Box>
-              )}
-            </>
-          )}
-        </div>
-        
-        {/* Ride Sharing Tab */}
-        <div
-          role="tabpanel"
-          hidden={tabValue !== 2}
-          id="tabpanel-2"
-          aria-labelledby="tab-2"
-        >
-          {tabValue === 2 && (
-            <>
-              {loadingPosts ? (
-                <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
-                  <CircularProgress />
-                </Box>
-              ) : rideRequests.length > 0 ? (
-                <List>
-                  {rideRequests.map((ride) => (
-                    <ListItem 
-                      key={ride._id}
-                      divider
-                      sx={{ py: 2 }}
-                    >
-                      <ListItemAvatar>
-                        <Avatar 
-                          src={ride.type === 'OFFER' ? 'https://via.placeholder.com/300x140?text=Offer' : 'https://via.placeholder.com/300x140?text=Request'} 
-                          variant="rounded"
-                          sx={{ width: 60, height: 60 }}
-                        >
-                          {ride.type === 'OFFER' ? 'O' : 'R'}
-                        </Avatar>
-                      </ListItemAvatar>
-                      <ListItemText
-                        primary={`${ride.origin} → ${ride.destination}`}
-                        secondary={
-                          <>
-                            <Typography component="span" variant="body2" color="text.primary">
-                              {new Date(ride.date).toLocaleDateString()} at {ride.time}
-                            </Typography>
-                            <br />
-                            {ride.type === 'OFFER' ? 'Offering Ride' : 'Requesting Ride'}
-                          </>
-                        }
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton edge="end" onClick={() => handleViewItem(ride)}>
-                          <PhotoCameraIcon />
-                        </IconButton>
-                        <IconButton edge="end" onClick={() => handleEditItem(ride)}>
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton edge="end" color="error" onClick={() => handleOpenDeleteDialog(ride._id, 'ride')}>
-                          <CancelIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                  ))}
-                </List>
-              ) : (
-                <Box sx={{ textAlign: 'center', py: 3 }}>
-                  <Typography variant="body1" color="text.secondary" paragraph>
-                    You haven't created any ride requests or offers yet.
-                  </Typography>
-                  <Button 
-                    variant="contained" 
-                    startIcon={<DirectionsBusIcon />}
-                    onClick={() => navigate('/ride-booking/new')}
-                  >
-                    Create a Ride Request/Offer
-                  </Button>
-                </Box>
-              )}
-            </>
-          )}
-        </div>
-      </Paper>
+// User Activity Tabs Section
+const renderUserActivity = () => {
+  return (
+    <Paper
+      elevation={3}
+      sx={{
+        p: 3,
+        mt: 4,
+        borderRadius: '16px',
+        background: 'rgba(255, 255, 255, 0.85)',
+        backdropFilter: 'blur(8px)',
+        boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+        border: '1px solid rgba(255, 255, 255, 0.5)'
+      }}
+    >
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5" gutterBottom>
+          Your Activity
+        </Typography>
+      </Box>
+      <Tabs value={tabValue} onChange={handleTabChange} aria-label="activity tabs">
+        <Tab label="Marketplace" />
+        <Tab label="Lost & Found" />
+        <Tab label="Ride Shares" />
+        <Tab icon={<Badge badgeContent={messageCount} color="error" invisible={messageCount === 0}><MessageIcon /></Badge>} label="Messages" />
+      </Tabs>
+      <Divider sx={{ my: 2 }} />
+      {/* Marketplace Tab */}
+      <div role="tabpanel" hidden={tabValue !== 0} id="tabpanel-0" aria-labelledby="tab-0">
+        {marketplacePosts.length > 0 ? (
+          <List>
+            {marketplacePosts.map((post) => (
+              <ListItem key={post._id} divider sx={{ py: 2 }}>
+                <ListItemAvatar>
+                  <Avatar src={post.images && post.images.length > 0 ? post.images[0] : ''} variant="rounded" sx={{ width: 60, height: 60 }}>
+                    {!post.images || post.images.length === 0 ? post.title.charAt(0) : null}
+                  </Avatar>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={post.title}
+                  secondary={
+                    <>
+                      <Typography component="span" variant="body2" color="text.primary">
+                        ${post.price} • {post.category}
+                      </Typography>
+                      <br />
+                      {post.description.substring(0, 100)}
+                      {post.description.length > 100 ? '...' : ''}
+                    </>
+                  }
+                />
+                <ListItemSecondaryAction>
+                  <IconButton edge="end" onClick={() => handleViewItem(post)}>
+                    <PhotoCameraIcon />
+                  </IconButton>
+                  <IconButton edge="end" onClick={() => handleEditItem(post)}>
+                    <EditIcon />
+                  </IconButton>
+                  <IconButton edge="end" onClick={() => handleOpenDeleteDialog(post._id, 'marketplace')}>
+                    <DeleteIcon />
+                  </IconButton>
+                </ListItemSecondaryAction>
+              </ListItem>
+            ))}
+          </List>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 3 }}>
+            <Typography variant="body1" color="text.secondary" paragraph>
+              You haven't posted any items in the marketplace yet.
+            </Typography>
+            <Button 
+              variant="contained" 
+              startIcon={<StoreIcon />}
+              onClick={() => navigate('/marketplace/sell')}
+            >
+              Create Your First Post
+            </Button>
+          </Box>
+        )}
+      </div>
+      {/* Lost & Found Tab */}
+      <div role="tabpanel" hidden={tabValue !== 1} id="tabpanel-1" aria-labelledby="tab-1">
+        {lostFoundItems.length > 0 ? (
+          <List>
+            {lostFoundItems.map((item) => (
+              <ListItem key={item._id} divider sx={{ py: 2 }}>
+                <ListItemAvatar>
+                  <Avatar src={item.images && item.images.length > 0 ? item.images[0] : ''} variant="rounded" sx={{ width: 60, height: 60 }}>
+                    {!item.images || item.images.length === 0 ? item.title.charAt(0) : null}
+                  </Avatar>
+                </ListItemAvatar>
+                <ListItemText
+                  primary={item.title}
+                  secondary={
+                    <>
+                      <Typography component="span" variant="body2" color="text.primary">
+                        {item.category}
+                      </Typography>
+                      <br />
+                      {item.description.substring(0, 100)}
+                      {item.description.length > 100 ? '...' : ''}
+                    </>
+                  }
+                />
+                <ListItemSecondaryAction>
+                  <IconButton edge="end" onClick={() => handleOpenDeleteDialog(item._id, 'lostfound')}>
+                    <DeleteIcon />
+                  </IconButton>
+                </ListItemSecondaryAction>
+              </ListItem>
+            ))}
+          </List>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 3 }}>
+            <Typography variant="body1" color="text.secondary" paragraph>
+              You haven't posted any lost & found reports yet.
+            </Typography>
+          </Box>
+        )}
+      </div>
+      {/* Ride Shares Tab */}
+      <div role="tabpanel" hidden={tabValue !== 2} id="tabpanel-2" aria-labelledby="tab-2">
+        <RideShareList userId={user?._id || user?.id} />
+      </div>
+      {/* Messages Tab */}
+      <div role="tabpanel" hidden={tabValue !== 3} id="tabpanel-3" aria-labelledby="tab-3">
+        <MessageCenter userId={user?._id || user?.id} />
+      </div>
+    </Paper>
+  );
+};
+
+
+
+
+const handleEditItemSuccess = (updatedItemData) => {
+  // Update the item in the list
+  // Handle different response data structures
+  const updatedItem = updatedItemData.item || updatedItemData;
+  if (updatedItem && updatedItem._id) {
+    setMarketplacePosts(prevItems =>
+      prevItems.map(item =>
+        item._id === updatedItem._id ? updatedItem : item
+      )
     );
-  };
+    setEditItemOpen(false);
+    setSelectedItemForEdit(null);
+    setSnackbar({
+      open: true,
+      message: 'Item updated successfully',
+      severity: 'success'
+    });
+  } else {
+    console.error('Invalid update data received:', updatedItemData);
+    setSnackbar({
+      open: true,
+      message: 'Error updating item. Please try again.',
+      severity: 'error'
+    });
+  }
+};
 
-  const handleViewItem = (item) => {
-    setSelectedItem(item);
-    setItemDetailsOpen(true);
-  };
-
-  const handleEditItem = (item) => {
-    setSelectedItemForEdit(item);
-    setEditItemOpen(true);
-  };
-
-  const handleEditItemSuccess = (updatedItemData) => {
-    // Update the item in the list
-    // Handle different response data structures
-    const updatedItem = updatedItemData.item || updatedItemData;
-    
-    if (updatedItem && updatedItem._id) {
-      setMarketplacePosts(prevItems => 
-        prevItems.map(item => 
-          item._id === updatedItem._id ? updatedItem : item
-        )
-      );
-      
-      setEditItemOpen(false);
-      setSelectedItemForEdit(null);
-      
-      setSnackbar({
-        open: true,
-        message: 'Item updated successfully',
-        severity: 'success'
-      });
-    } else {
-      console.error('Invalid update data received:', updatedItemData);
-      setSnackbar({
-        open: true,
-        message: 'Error updating item. Please try again.',
-        severity: 'error'
-      });
-    }
-  };
-
-  const handleConfirmDeleteItem = async () => {
+const handleConfirmDeleteItem = async () => {
     if (!itemToDelete) return;
     
     setDeletingItem(true);

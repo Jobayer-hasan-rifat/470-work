@@ -57,7 +57,6 @@ const Payment = () => {
     fullName: '',
     address: '',
     location: '',
-    zipCode: '',
     phone: '',
     deliveryOption: 'standard',
     paymentMethod: 'bkash',
@@ -148,41 +147,60 @@ const Payment = () => {
     });
   };
   
-  const processPayment = () => {
+  const processPayment = async () => {
     setLoading(true);
     
-    // Simulate payment processing
-    setTimeout(() => {
-      setOrderReference(Math.random().toString(36).substring(2, 10).toUpperCase());
-      setOrderComplete(true);
+    try {
+      // Create the order
+      const orderData = {
+        item_id: item._id,
+        seller_id: item.seller.id,
+        delivery_info: {
+          fullName: paymentInfo.fullName,
+          address: paymentInfo.address,
+          location: paymentInfo.location,
+          phone: paymentInfo.phone,
+          deliveryOption: paymentInfo.deliveryOption
+        },
+        payment_info: {
+          method: paymentInfo.paymentMethod,
+          transactionId: paymentInfo.transactionId,
+          [paymentInfo.paymentMethod + 'Number']: paymentInfo[paymentInfo.paymentMethod + 'Number']
+        },
+        total_amount: parseFloat(item.price)
+      };
+
+      const token = localStorage.getItem('token');
+      const response = await axios.post('/api/marketplace/orders', orderData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.data.order_id) {
+        setOrderReference(response.data.order_id);
+        setOrderComplete(true);
+        
+        // Show success message and redirect
+        navigate('/marketplace', { 
+          state: { 
+            notification: {
+              message: 'Order placed successfully! The item has been marked as sold.',
+              severity: 'success'
+            }
+          }
+        });
+      }
+    } catch (error) {
+      setError(error.response?.data?.error || 'Failed to process payment. Please try again.');
+    } finally {
       setLoading(false);
-    }, 2000);
-    
-    // In a real app, you would call your payment API
-    // try {
-    //   const response = await axios.post('http://localhost:5000/api/payment', {
-    //     itemId: item._id,
-    //     paymentInfo
-    //   });
-    //   setOrderReference(response.data.orderReference);
-    //   setOrderComplete(true);
-    // } catch (err) {
-    //   setError('Payment failed. Please try again.');
-    //   console.error(err);
-    // } finally {
-    //   setLoading(false);
-    // }
+    }
   };
   
   const handleReturnToMarketplace = () => {
-    navigate('/marketplace', { 
-      state: { 
-        notification: {
-          message: 'Your order has been placed successfully!',
-          severity: 'success'
-        }
-      }
-    });
+    navigate('/marketplace');
   };
   
   const handleCancelOrder = () => {
@@ -313,16 +331,7 @@ const Payment = () => {
                         </Select>
                       </FormControl>
                     </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <TextField
-                        fullWidth
-                        required
-                        label="Zip Code"
-                        name="zipCode"
-                        value={paymentInfo.zipCode}
-                        onChange={handleInputChange}
-                      />
-                    </Grid>
+
                     <Grid item xs={12}>
                       <TextField
                         fullWidth

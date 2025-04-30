@@ -37,12 +37,15 @@ import StoreIcon from '@mui/icons-material/Store';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import MenuIcon from '@mui/icons-material/Menu';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import CloseIcon from '@mui/icons-material/Close';
 import axios from 'axios';
 import '../AppBackgrounds.css';
 import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDrawer';
 import RideShareList from '../components/RideShareList';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
+import NotificationForm from '../components/NotificationForm';
 
 // Drawer width for the sidebar
 const drawerWidth = 240;
@@ -66,6 +69,7 @@ async function axiosGetWithRetry(url, config = {}, retries = 4, delay = 500) {
 }
 
 const AdminDashboard = () => {
+  const [showNotificationForm, setShowNotificationForm] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editUserData, setEditUserData] = useState(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -437,7 +441,7 @@ const AdminDashboard = () => {
       // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       
-      // Add timestamp to prevent caching
+      // Add timestamp to requests to prevent caching
       const timestamp = new Date().getTime();
       const response = await axiosGetWithRetry(`/api/marketplace/items?_=${timestamp}`);
       setMarketplaceItems(response.data || []);
@@ -699,6 +703,10 @@ const AdminDashboard = () => {
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
+  };
+
+  const handleManageRideShare = () => {
+    setActiveView('rideshare');
   };
 
   const fetchDashboardData = async (showLoading = true) => {
@@ -1143,6 +1151,19 @@ const AdminDashboard = () => {
           </ListItemIcon>
           <ListItemText primary="Manage Ride Share" />
         </ListItem>
+        <ListItem 
+          button 
+          onClick={() => {
+            setActiveView('notifications');
+            setShowNotificationForm(true);
+          }}
+          selected={activeView === 'notifications'}
+        >
+          <ListItemIcon>
+            <NotificationsIcon color={activeView === 'notifications' ? 'primary' : 'inherit'} />
+          </ListItemIcon>
+          <ListItemText primary="Announcements" />
+        </ListItem>
       </List>
       <Divider />
       <List>
@@ -1179,6 +1200,25 @@ const AdminDashboard = () => {
 
   // Render different content based on active view
   const renderContent = () => {
+    if (activeView === 'notifications') {
+      return (
+        <Box sx={{ mt: 2 }}>
+          <Paper sx={{ p: 2, mb: 2 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6">Create Announcement</Typography>
+              <IconButton onClick={() => {
+                setShowNotificationForm(false);
+                setActiveView('dashboard');
+              }}>
+                <CloseIcon />
+              </IconButton>
+            </Box>
+            <NotificationForm />
+          </Paper>
+        </Box>
+      );
+    }
+
     if (activeView === 'rideshare') {
       return (
         <Box sx={{ mt: 2 }}>
@@ -1418,7 +1458,7 @@ const AdminDashboard = () => {
                             onClick={() => handleApproveUser(user._id)}
                             disabled={actionLoading === user._id}
                           >
-                            {actionLoading === user._id ? <CircularProgress size={20} color="inherit" /> : 'Approve'}
+                            {actionLoading === user._id ? <CircularProgress size={20} /> : 'Approve'}
                           </Button>
                           <Button 
                             variant="contained" 
@@ -1427,7 +1467,7 @@ const AdminDashboard = () => {
                             onClick={() => handleRejectUser(user._id)}
                             disabled={actionLoading === user._id}
                           >
-                            {actionLoading === user._id ? <CircularProgress size={20} color="inherit" /> : 'Reject'}
+                            {actionLoading === user._id ? <CircularProgress size={20} /> : 'Reject'}
                           </Button>
                         </Box>
                       }
@@ -1518,7 +1558,7 @@ const AdminDashboard = () => {
                             onClick={() => handleDeleteVerifiedUser(user._id)}
                             disabled={actionLoading === user._id}
                           >
-                            {actionLoading === user._id ? <CircularProgress size={20} color="inherit" /> : 'Delete'}
+                            {actionLoading === user._id ? <CircularProgress size={20} /> : 'Delete'}
                           </Button>
                         </Box>
                       }
@@ -1806,6 +1846,24 @@ const AdminDashboard = () => {
                 </Button>
               </DialogActions>
             </Dialog>
+          </Box>
+        );
+
+      case 'notifications':
+        return (
+          <Box sx={{ mt: 2 }}>
+            <Paper sx={{ p: 2, mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">Create Announcement</Typography>
+                <IconButton onClick={() => {
+                  setShowNotificationForm(false);
+                  setActiveView('dashboard');
+                }}>
+                  <CloseIcon />
+                </IconButton>
+              </Box>
+              <NotificationForm />
+            </Paper>
           </Box>
         );
 

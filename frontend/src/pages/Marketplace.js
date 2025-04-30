@@ -525,36 +525,47 @@ const currentUserEmail = localStorage.getItem('email') || '';
               ),
               React.createElement(Box, { sx: { p: 2, pt: 0, mt: 'auto' } },
                 React.createElement(Grid, { container: true, spacing: 1 },
-                  React.createElement(Grid, { item: true, xs: 6 },
-                    React.createElement(Button, {
-                      size: "small",
-                      fullWidth: true,
-                      variant: "outlined",
-                      onClick: () => handleViewDetails(item)
-                    }, "Details")
-                  ),
-                  // Only show Buy Now and Contact Seller buttons if the item is not created by the current user (by email)
-(item.seller?.email && item.seller.email !== currentUserEmail) && [
-  React.createElement(Grid, { item: true, xs: 6, key: 'buy' },
-    React.createElement(Button, {
-      size: "small",
-      fullWidth: true,
-      variant: "contained",
-      onClick: () => handleBuyNow(item)
-    }, "Buy Now")
-  ),
-  React.createElement(Grid, { item: true, xs: 6, key: 'contact' },
-    React.createElement(Button, {
-      size: "small",
-      fullWidth: true,
-      variant: "outlined",
-      onClick: () => {
-        setChatSeller(item.seller);
-        setOpenChatDialog(true);
-      }
-    }, "Contact Seller")
-  )
-]
+                  // Show different buttons based on whether the user is the creator
+                  item.seller?.email === currentUserEmail ?
+                  [
+                    React.createElement(Grid, { item: true, xs: 12, key: 'yourItem' },
+                      React.createElement(Button, {
+                        size: "small",
+                        fullWidth: true,
+                        variant: "outlined",
+                        onClick: () => handleViewDetails(item)
+                      }, "You Listed This Item - View Details")
+                    )
+                  ] :
+                  [
+                    React.createElement(Grid, { item: true, xs: 12, key: 'details' },
+                      React.createElement(Button, {
+                        size: "small",
+                        fullWidth: true,
+                        variant: "outlined",
+                        onClick: () => handleViewDetails(item)
+                      }, "View Details")
+                    ),
+                    React.createElement(Grid, { item: true, xs: 6, key: 'buy' },
+                      React.createElement(Button, {
+                        size: "small",
+                        fullWidth: true,
+                        variant: "contained",
+                        onClick: () => handleBuyNow(item)
+                      }, "Buy Now")
+                    ),
+                    React.createElement(Grid, { item: true, xs: 6, key: 'contact' },
+                      React.createElement(Button, {
+                        size: "small",
+                        fullWidth: true,
+                        variant: "outlined",
+                        onClick: () => {
+                          setChatSeller(item.seller);
+                          setOpenChatDialog(true);
+                        }
+                      }, "Contact Seller")
+                    )
+                  ]
                 )
               )
             )

@@ -41,6 +41,7 @@ import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import LogoutIcon from '@mui/icons-material/Logout';
 import DeleteIcon from '@mui/icons-material/Delete';
 import MessageIcon from '@mui/icons-material/Message';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCart';
 import AddIcon from '@mui/icons-material/Add';
 import Badge from '@mui/material/Badge';
 import { useNavigate } from 'react-router-dom';
@@ -50,6 +51,7 @@ import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDr
 import RideShareList from '../components/RideShareList';
 import MarketplaceItemForm from '../components/MarketplaceItemForm';
 import MessageCenter from '../components/MessageCenter';
+import OrderHistory from '../components/OrderHistory';
 
 const UserProfile = () => {
   // ...existing state hooks...
@@ -331,6 +333,8 @@ const UserProfile = () => {
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
+    // Reset loading state when changing tabs
+    setLoadingPosts(true);
   };
 
   const handleEditClick = () => {
@@ -385,44 +389,60 @@ const UserProfile = () => {
 
   // Load user posts based on active tab
   useEffect(() => {
-    if (user?._id) {
+    const fetchTabData = async () => {
+      if (!user?._id) return;
+      
       setLoadingPosts(true);
-      
-      // Add timestamp to prevent caching
+      const token = localStorage.getItem('token');
       const timestamp = new Date().getTime();
-      const endpoint = 
-        tabValue === 0 ? `/api/marketplace/items/user/${user._id}?_=${timestamp}` : 
-        tabValue === 1 ? `/api/lost-found/user-items/${user._id}?_=${timestamp}` : 
-        `/api/ride/user-requests/${user._id}?_=${timestamp}`;
       
-      axios.get(endpoint, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-      })
-        .then(response => {
-          if (tabValue === 0) {
+      try {
+        let response;
+        switch(tabValue) {
+          case 0: // Marketplace
+            response = await axios.get(`/api/marketplace/items/user/${user._id}?_=${timestamp}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
             setMarketplacePosts(response.data || []);
-          } else if (tabValue === 1) {
+            break;
+            
+          case 1: // Lost & Found
+            response = await axios.get(`/api/lost-found/user-items/${user._id}?_=${timestamp}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
             setLostFoundItems(response.data || []);
-          } else {
+            break;
+            
+          case 2: // Ride Share
+            response = await axios.get(`/api/ride/user-requests/${user._id}?_=${timestamp}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
             setRideRequests(response.data || []);
-          }
-        })
-        .catch(error => {
-          console.error(`Error fetching user ${tabValue === 0 ? 'marketplace items' : tabValue === 1 ? 'lost & found items' : 'rides'}:`, error);
-          // Don't show the error message to the user, just reset the data to empty array
-          if (tabValue === 0) {
-            setMarketplacePosts([]);
-          } else if (tabValue === 1) {
-            setLostFoundItems([]);
-          } else {
-            setRideRequests([]);
-          }
-        })
-        .finally(() => {
-          setLoadingPosts(false);
+            break;
+            
+          case 3: // Orders
+            setLoadingPosts(false); // Order history handles its own loading
+            return;
+            
+          default:
+            return;
+        }
+      } catch (error) {
+        console.error('Error fetching tab data:', error);
+        setSnackbar({
+          open: true,
+          message: 'Failed to load data. Please try again.',
+          severity: 'error'
         });
-    }
+      } finally {
+        setLoadingPosts(false);
+      }
+    };
+    
+    fetchTabData();
   }, [user, tabValue]);
+
+
 
   // Handle delete dialog actions
   const handleOpenDeleteDialog = (id, type) => {
@@ -568,9 +588,10 @@ const renderUserActivity = () => {
         </Typography>
       </Box>
       <Tabs value={tabValue} onChange={handleTabChange} aria-label="activity tabs">
-        <Tab label="Marketplace" />
-        <Tab label="Lost & Found" />
-        <Tab label="Ride Shares" />
+        <Tab icon={<StoreIcon />} label="Marketplace" />
+        <Tab icon={<HelpOutlineIcon />} label="Lost & Found" />
+        <Tab icon={<DirectionsBusIcon />} label="Ride Share" />
+        <Tab icon={<ShoppingCartIcon />} label="Orders" />
         <Tab icon={<Badge badgeContent={messageCount} color="error" invisible={messageCount === 0}><MessageIcon /></Badge>} label="Messages" />
       </Tabs>
       <Divider sx={{ my: 2 }} />
@@ -671,8 +692,12 @@ const renderUserActivity = () => {
       <div role="tabpanel" hidden={tabValue !== 2} id="tabpanel-2" aria-labelledby="tab-2">
         <RideShareList userId={user?._id || user?.id} />
       </div>
-      {/* Messages Tab */}
+      {/* Orders Tab */}
       <div role="tabpanel" hidden={tabValue !== 3} id="tabpanel-3" aria-labelledby="tab-3">
+        <OrderHistory />
+      </div>
+      {/* Messages Tab */}
+      <div role="tabpanel" hidden={tabValue !== 4} id="tabpanel-4" aria-labelledby="tab-4">
         <MessageCenter userId={user?._id || user?.id} />
       </div>
     </Paper>
@@ -782,477 +807,157 @@ const handleConfirmDeleteItem = async () => {
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      {/* Back to Dashboard Button and Logged-in Student Name */}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <Button
-          variant="outlined"
-          color="primary"
-          onClick={() => navigate('/')}
-          sx={{ mr: 2 }}
-        >
-          Back to Home
-        </Button>
-        {/* Show logged-in student name */}
-        {user && (
-          <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
-            Logged in as: {user.name}
-          </Typography>
-        )}
-      </Box>
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <>
-          {/* User Profile Section */}
-          <Paper 
-            elevation={3} 
-            sx={{ 
-              p: 3, 
-              borderRadius: '16px', 
-              mb: 4,
-              background: 'rgba(255, 255, 255, 0.85)',
-              backdropFilter: 'blur(8px)',
-              boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
-              border: '1px solid rgba(255, 255, 255, 0.5)'
-            }}
-          >
-            <Grid container spacing={3}>
-              {/* Profile Image Section */}
-              <Grid item xs={12} md={4} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <Box sx={{ position: 'relative' }}>
-                  <Avatar 
-                    src={profileImage} 
-                    alt={user?.name || 'User'} 
-                    sx={{ 
-                      width: 200, 
-                      height: 200, 
-                      mb: 2,
-                      border: '3px solid #1976d2',
-                      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
-                      bgcolor: 'secondary.main',
-                      fontSize: 80
-                    }}
-                  >
-                    {user?.name ? user.name.charAt(0).toUpperCase() : '?'}
-                  </Avatar>
-                  {uploadingImage ? (
-                    <CircularProgress 
-                      size={30} 
-                      sx={{ 
-                        position: 'absolute', 
-                        bottom: 20, 
-                        right: 0 
-                      }} 
-                    />
-                  ) : (
-                    <Box sx={{ position: 'absolute', bottom: 20, right: 0, display: 'flex' }}>
-                      {profileImage && (
-                        <IconButton
-                          color="error"
-                          aria-label="delete picture"
-                          sx={{ 
-                            mr: 1,
-                            backgroundColor: 'white',
-                            '&:hover': { backgroundColor: '#f5f5f5' }
-                          }}
-                          onClick={handleDeleteProfilePicture}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      )}
-                      <IconButton
-                        color="primary"
-                        aria-label="upload picture"
-                        component="label"
-                        sx={{ 
-                          backgroundColor: 'white',
-                          '&:hover': { backgroundColor: '#f5f5f5' }
-                        }}
-                      >
-                        <input 
-                          hidden 
-                          accept="image/*" 
-                          type="file" 
-                          onChange={handleProfileImageChange} 
-                        />
-                        <PhotoCameraIcon />
-                      </IconButton>
-                    </Box>
-                  )}
-                </Box>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  {user?.name}
-                </Typography>
-                <Typography variant="body1" color="text.secondary" gutterBottom>
-                  {user?.email}
-                </Typography>
-                
-                {/* ID Card View Section */}
-                <Box sx={{ 
-                  mt: 3, 
-                  width: '100%', 
-                  p: 2, 
-                  borderRadius: '8px',
-                  textAlign: 'center',
-                  background: 'rgba(255, 255, 255, 0.5)',
-                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.05)'
-                }}>
-                  <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 500 }}>
-                    ID Card
-                  </Typography>
-                  
-                  {idCardImage ? (
-                    <Box sx={{ position: 'relative', mb: 1 }}>
-                      <img 
-                        src={idCardImage} 
-                        alt="ID Card" 
-                        style={{ 
-                          width: '100%', 
-                          borderRadius: '4px',
-                          maxHeight: '120px',
-                          objectFit: 'contain',
-                          border: '1px solid rgba(0, 0, 0, 0.1)'
-                        }}
-                        onError={(e) => {
-                          e.target.onerror = null;
-                          e.target.style.display = 'none';
-                          console.error('Error loading ID card image');
-                          // Show a fallback element when image fails to load
-                          const parent = e.target.parentNode;
-                          const fallback = document.createElement('div');
-                          fallback.style.padding = '20px';
-                          fallback.style.background = 'rgba(0, 0, 0, 0.03)';
-                          fallback.style.borderRadius = '4px';
-                          fallback.style.color = 'rgba(0, 0, 0, 0.6)';
-                          fallback.innerText = 'Unable to load ID card image';
-                          parent.appendChild(fallback);
-                        }}
-                      />
-                    </Box>
-                  ) : (
-                    <Box sx={{ p: 2, bgcolor: 'rgba(0, 0, 0, 0.03)', borderRadius: '4px' }}>
-                      <Typography variant="body2" color="text.secondary">
-                        ID card image not available
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-                
-                {!editMode && (
-                  <Box sx={{ mt: 3, width: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                    <Button 
-                      variant="contained" 
-                      className="gradient-primary"
-                      fullWidth
-                      onClick={handleEditClick}
-                      startIcon={<EditIcon />}
-                    >
-                      Edit Profile
-                    </Button>
-                    <Button 
-                      variant="outlined" 
-                      color="error"
-                      fullWidth
-                      startIcon={<LogoutIcon />}
-                      onClick={handleLogout}
-                    >
-                      Logout
-                    </Button>
-                  </Box>
-                )}
-              </Grid>
-              
-              {/* User Details Section */}
-              <Grid item xs={12} md={8}>
-                <Typography variant="h5" gutterBottom sx={{ fontWeight: 600 }}>
-                  {editMode ? 'Edit Profile' : 'Profile Information'}
-                </Typography>
-                <Divider sx={{ mb: 3 }} />
-                
-                {editMode ? (
-                  <>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Name"
-                          name="name"
-                          variant="outlined"
-                          value={updatedUser.name || ''}
-                          onChange={handleInputChange}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Email"
-                          name="email"
-                          variant="outlined"
-                          value={updatedUser.email || ''}
-                          disabled
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Student ID"
-                          name="student_id"
-                          variant="outlined"
-                          value={updatedUser.student_id || ''}
-                          onChange={handleInputChange}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Department"
-                          name="department"
-                          variant="outlined"
-                          value={updatedUser.department || ''}
-                          onChange={handleInputChange}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Semester"
-                          name="semester"
-                          variant="outlined"
-                          value={updatedUser.semester || ''}
-                          onChange={handleInputChange}
-                        />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          fullWidth
-                          label="Phone"
-                          name="phone"
-                          variant="outlined"
-                          value={updatedUser.phone || ''}
-                          onChange={handleInputChange}
-                          placeholder="Add your phone number"
-                        />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          fullWidth
-                          label="Address"
-                          name="address"
-                          variant="outlined"
-                          multiline
-                          rows={2}
-                          value={updatedUser.address || ''}
-                          onChange={handleInputChange}
-                        />
-                      </Grid>
-                    </Grid>
-                    
-                    <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
-                      <Button 
-                        variant="outlined" 
-                        color="error" 
-                        startIcon={<CancelIcon />} 
-                        sx={{ mr: 2 }}
-                        onClick={handleCancelEdit}
-                      >
-                        Cancel
-                      </Button>
-                      <Button 
-                        variant="contained" 
-                        color="primary" 
-                        startIcon={<SaveIcon />}
-                        onClick={handleSaveChanges}
-                      >
-                        Save Changes
-                      </Button>
-                    </Box>
-                  </>
-                ) : (
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Student ID
-                      </Typography>
-                      <Typography variant="body1" sx={{ mb: 2 }}>
-                        {user?.student_id || 'Not provided'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Department
-                      </Typography>
-                      <Typography variant="body1" sx={{ mb: 2 }}>
-                        {user?.department || 'Not provided'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Semester
-                      </Typography>
-                      <Typography variant="body1" sx={{ mb: 2 }}>
-                        {user?.semester || 'Not provided'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12} sm={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Phone
-                      </Typography>
-                      <Typography variant="body1" sx={{ mb: 2 }}>
-                        {user?.phone || 'Not provided'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Typography variant="body2" color="text.secondary">
-                        Address
-                      </Typography>
-                      <Typography variant="body1" sx={{ mb: 2 }}>
-                        {user?.address || 'Not provided'}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={12}>
-                      <Typography variant="body2" color="text.secondary">
-                        Account Status
-                      </Typography>
-                      <Typography 
-                        variant="body1" 
-                        sx={{ 
-                          color: user?.verification_status === 'approved' ? 'green' : 'orange',
-                          fontWeight: 600,
-                          mb: 2
-                        }}
-                      >
-                        {user?.verification_status === 'approved' ? 'Verified' : 'Pending Verification'}
-                      </Typography>
-                    </Grid>
-                  </Grid>
-                )}
-              </Grid>
-            </Grid>
-          </Paper>
-          
-          {/* User Activity Section with Tabs */}
-          {renderUserActivity()}
-          
-          {/* Delete Confirmation Dialog */}
-          <Dialog
-            open={deleteDialog.open}
-            onClose={handleCloseDeleteDialog}
-            aria-labelledby="delete-dialog-title"
-            aria-describedby="delete-dialog-description"
-          >
-            <DialogTitle id="delete-dialog-title">
-              Confirm Delete
-            </DialogTitle>
-            <DialogContent>
-              <DialogContentText id="delete-dialog-description">
-                Are you sure you want to delete this {
-                  deleteDialog.postType === 'marketplace' ? 'marketplace item' : 
-                  deleteDialog.postType === 'lostfound' ? 'lost & found report' : 
-                  'ride request'
-                }? This action cannot be undone.
-              </DialogContentText>
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={handleCloseDeleteDialog}>Cancel</Button>
-              <Button onClick={handleDeleteItem} color="error" autoFocus>
-                Delete
-              </Button>
-            </DialogActions>
-          </Dialog>
-          
-          {/* Item Details Dialog */}
-          {selectedItem && (
-            <MarketplaceItemDetailsDrawer
-              open={itemDetailsOpen}
-              item={selectedItem}
-              onClose={() => setItemDetailsOpen(false)}
-              onEditSuccess={handleEditItemSuccess}
-              onDeleteSuccess={(deletedItemId) => {
-                if (deletedItemId) {
-                  setMarketplacePosts(prevItems => prevItems.filter(item => item._id !== deletedItemId));
-                  setSnackbar({
-                    open: true,
-                    message: 'Item deleted successfully',
-                    severity: 'success'
-                  });
-                } else {
-                  // If we don't get a valid ID, refresh the list
-                  handleRefreshMarketplaceItems();
-                }
-              }}
-              showActions={true}
-            />
-          )}
-          
-          {/* Edit Item Dialog */}
-          {selectedItemForEdit && (
-            <MarketplaceItemForm
-              open={editItemOpen}
-              onClose={() => setEditItemOpen(false)}
-              item={selectedItemForEdit}
-              isEdit={true}
-              onSuccess={handleEditItemSuccess}
-            />
-          )}
-          
-          {/* Delete Confirmation Dialog */}
-          <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)}>
-            <DialogTitle>Confirm Deletion</DialogTitle>
-            <DialogContent>
-              <Typography>
-                Are you sure you want to delete "{itemToDelete?.title}"? This action cannot be undone.
-              </Typography>
-              {deleteError && (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {deleteError}
-                </Alert>
-              )}
-            </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setConfirmDeleteOpen(false)} disabled={deletingItem}>
-                Cancel
-              </Button>
-              <Button 
-                color="error" 
-                onClick={handleConfirmDeleteItem}
-                disabled={deletingItem}
-                startIcon={deletingItem ? <CircularProgress size={20} /> : null}
-              >
-                Delete
-              </Button>
-            </DialogActions>
-          </Dialog>
-          
-          {/* New Item Dialog */}
-          <MarketplaceItemForm
-            open={newItemOpen}
-            onClose={() => setNewItemOpen(false)}
-            isEdit={false}
-            onSuccess={handleNewItemSuccess}
-          />
-          
-          {/* Snackbar for notifications */}
-          <Snackbar
-            open={snackbar.open}
-            autoHideDuration={5000}
-            onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
-            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-          >
-            <Alert 
-              onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} 
-              severity={snackbar.severity} 
-              variant="filled"
-              sx={{ width: '100%' }}
+    <Box sx={{ width: '100%', minHeight: '100vh', bgcolor: '#f5f5f5', pt: 4, pb: 4 }}>
+      <Container maxWidth="xl">
+        <Paper elevation={3} sx={{ p: 3, width: '100%' }}>
+          {/* Back to Dashboard Button and Logged-in Student Name */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => navigate('/')}
+              sx={{ mr: 2 }}
             >
-              {snackbar.message}
-            </Alert>
-          </Snackbar>
-        </>
-      )}
-    </Container>
+              Back to Home
+            </Button>
+            {/* Show logged-in student name */}
+            {user && (
+              <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                Logged in as: {user.name}
+              </Typography>
+            )}
+          </Box>
+
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <>
+              <Box sx={{ width: '100%', typography: 'body1' }}>
+                <Tabs value={tabValue} onChange={handleTabChange} centered>
+                  <Tab icon={<StoreIcon />} label="Marketplace" />
+                  <Tab icon={<HelpOutlineIcon />} label="Lost & Found" />
+                  <Tab icon={<DirectionsBusIcon />} label="Ride Share" />
+                  <Tab icon={<ShoppingCartIcon />} label="Orders" />
+                  <Tab 
+                    icon={
+                      <Badge badgeContent={messageCount} color="error" invisible={messageCount === 0}>
+                        <MessageIcon />
+                      </Badge>
+                    } 
+                    label="Messages" 
+                  />
+                </Tabs>
+
+                <Box sx={{ mt: 3 }}>
+                  {/* Marketplace Tab */}
+                  <div role="tabpanel" hidden={tabValue !== 0}>
+                    {loadingPosts ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                        <CircularProgress />
+                      </Box>
+                    ) : (
+                      <Grid container spacing={3}>
+                        {marketplacePosts.map((post) => (
+                          <Grid item xs={12} sm={6} md={4} key={post._id}>
+                            <Card>
+                              <CardMedia
+                                component="img"
+                                height="200"
+                                image={post.images?.[0] || "https://via.placeholder.com/300x200?text=No+Image"}
+                                alt={post.title}
+                              />
+                              <CardContent>
+                                <Typography variant="h6" gutterBottom>
+                                  {post.title}
+                                </Typography>
+                                <Typography variant="h5" color="primary">
+                                  ৳{post.price.toLocaleString()}
+                                </Typography>
+                              </CardContent>
+                              <CardActions>
+                                <Button size="small" onClick={() => handleViewItem(post)}>
+                                  View Details
+                                </Button>
+                                <Button size="small" onClick={() => handleEditItem(post)}>
+                                  Edit
+                                </Button>
+                                <Button 
+                                  size="small" 
+                                  color="error"
+                                  onClick={() => {
+                                    setItemToDelete(post);
+                                    setConfirmDeleteOpen(true);
+                                  }}
+                                >
+                                  Delete
+                                </Button>
+                              </CardActions>
+                            </Card>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    )}
+                  </div>
+
+                  {/* Lost & Found Tab */}
+                  <div role="tabpanel" hidden={tabValue !== 1}>
+                    {loadingPosts ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                        <CircularProgress />
+                      </Box>
+                    ) : (
+                      <Grid container spacing={3}>
+                        {lostFoundItems.map((item) => (
+                          <Grid item xs={12} sm={6} md={4} key={item._id}>
+                            <Card>
+                              <CardMedia
+                                component="img"
+                                height="200"
+                                image={item.images?.[0] || "https://via.placeholder.com/300x200?text=No+Image"}
+                                alt={item.title}
+                              />
+                              <CardContent>
+                                <Typography variant="h6" gutterBottom>
+                                  {item.title}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {item.description}
+                                </Typography>
+                              </CardContent>
+                              <CardActions>
+                                <Button size="small">Edit</Button>
+                                <Button size="small" color="error">Delete</Button>
+                              </CardActions>
+                            </Card>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    )}
+                  </div>
+
+                  {/* Ride Share Tab */}
+                  <div role="tabpanel" hidden={tabValue !== 2}>
+                    <RideShareList rides={rideRequests} loading={loadingPosts} />
+                  </div>
+
+                  {/* Orders Tab */}
+                  <div role="tabpanel" hidden={tabValue !== 3}>
+                    <OrderHistory />
+                  </div>
+
+                  {/* Messages Tab */}
+                  <div role="tabpanel" hidden={tabValue !== 4}>
+                    <MessageCenter userId={user?._id} />
+                  </div>
+                </Box>
+              </Box>
+            </>
+          )}
+        </Paper>
+      </Container>
+    </Box>
   );
 };
 

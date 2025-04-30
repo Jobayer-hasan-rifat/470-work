@@ -286,7 +286,7 @@ def edit_user(user_id):
         current_app.logger.error(f"Error editing user: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
-@admin_bp.route('/statistics', methods=['GET'])
+@admin_bp.route('/statistics', methods=['GET', 'POST', 'OPTIONS'])
 @jwt_required()
 @admin_required
 @cache.cached(timeout=60)  # Cache statistics for 1 minute instead of 5 to show more recent items

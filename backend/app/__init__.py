@@ -12,13 +12,28 @@ import logging
 # Load environment variables
 load_dotenv()
 
+def get_request_limit_key():
+    from flask import request
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        try:
+            from flask_jwt_extended import decode_token
+            token = auth_header.split(' ')[1]
+            decoded = decode_token(token)
+            if decoded.get('role') == 'admin':
+                # Return None for admin users to bypass rate limiting
+                return None
+        except:
+            pass
+    return get_remote_address()
+
 # Initialize extensions
 jwt = JWTManager()
 cache = Cache(config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 300})
 compress = Compress()
 limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"],
+    key_func=get_request_limit_key,
+    default_limits=["1000 per minute"],  # More lenient default limit
     storage_uri="memory://"
 )
 
@@ -49,11 +64,12 @@ def create_app():
     
     # Register blueprints
     from app.controllers.auth import auth_bp
-    from app.controllers.marketplace import marketplace_bp
     from app.controllers.lost_found import lost_found_bp
     from app.controllers.ride import ride_bp
     from app.controllers.admin import admin_bp
     from app.controllers.users import users_bp
+    from app.routes.notification_routes import notification_bp
+    from app.routes.marketplace_routes import marketplace_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(marketplace_bp, url_prefix='/api/marketplace')
@@ -61,6 +77,7 @@ def create_app():
     app.register_blueprint(ride_bp, url_prefix='/api/ride')
     app.register_blueprint(admin_bp, url_prefix='/api/admin')
     app.register_blueprint(users_bp, url_prefix='/api/users')
+    app.register_blueprint(notification_bp, url_prefix='/api/notifications')
     
     # Serve uploaded files with caching
     @app.route('/uploads/<path:filename>')

@@ -263,59 +263,46 @@ def delete_share_ride(ride_id):
 @ride_bp.route('/share/admin/all', methods=['GET'])
 @jwt_required()
 def admin_get_all_share_rides():
-    user_id = get_jwt_identity()
-    
-    # Check if user_id is a valid ObjectId
     try:
-        if isinstance(user_id, str) and len(user_id) == 24:
-            user = db.users.find_one({'_id': ObjectId(user_id)})
-            if user and user.get('role') == 'admin':
-                # User is admin, proceed
-                pass
-            else:
-                # Check if user_id is 'admin' (special case for admin login)
-                if user_id == 'admin':
-                    # Allow admin user to proceed
-                    pass
-                else:
-                    return jsonify({'error': 'Admin privileges required'}), 403
-        else:
-            # Handle special case for admin login
-            if user_id == 'admin':
-                # Allow admin user to proceed
-                pass
-            else:
-                return jsonify({'error': 'Invalid user ID format'}), 400
-    except Exception as e:
-        # If user_id is 'admin', allow access
-        if user_id == 'admin':
-            # Allow admin user to proceed
-            pass
-        else:
-            return jsonify({'error': f'Error verifying admin: {str(e)}'}), 500
-    
-    # Fetch all ride shares
-    rides = list(db.share_rides.find())
-    
-    # Process ride data
-    for ride in rides:
-        ride['_id'] = str(ride['_id'])
-        ride['user_id'] = str(ride['user_id'])
+        # Get admin info from token
+        from flask_jwt_extended import decode_token
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Missing or invalid token'}), 401
+            
+        token = auth_header.split(' ')[1]
+        decoded = decode_token(token)
         
-        # Add user information
-        try:
-            ride_user = db.users.find_one({'_id': ObjectId(ride['user_id'])})
-            if ride_user:
+        # Check if it's an admin token
+        if decoded.get('role') != 'admin' or decoded.get('sub') != '470@gmail.com':
+            return jsonify({'error': 'Admin privileges required'}), 403
+            
+        # Fetch all ride shares
+        rides = list(db.share_rides.find())
+        
+        # Process ride data
+        for ride in rides:
+            ride['_id'] = str(ride['_id'])
+            ride['user_id'] = str(ride['user_id'])
+            
+            # Add user information
+            try:
+                ride_user = db.users.find_one({'_id': ObjectId(ride['user_id'])})
+                if ride_user:
+                    ride['user'] = {
+                        'name': ride_user.get('name', 'Unknown'),
+                        'email': ride_user.get('email', 'No email'),
+                        '_id': str(ride_user['_id'])
+                    }
+            except Exception:
+                # If user info can't be fetched, add placeholder
                 ride['user'] = {
-                    'name': ride_user.get('name', 'Unknown'),
-                    'email': ride_user.get('email', 'No email'),
-                    '_id': str(ride_user['_id'])
+                    'name': 'Unknown User',
+                    'email': 'No email available'
                 }
-        except Exception:
-            # If user info can't be fetched, add placeholder
-            ride['user'] = {
-                'name': 'Unknown User',
-                'email': 'No email available'
-            }
+        
+        return jsonify(rides), 200
+            
+    except Exception as e:
+        return jsonify({'error': f'Error accessing ride share data: {str(e)}'}), 500
     
-    return jsonify(rides), 200

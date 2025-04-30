@@ -390,9 +390,12 @@ def admin_login():
         if email == "470@gmail.com" and password == "bracu2025":
             # Generate admin JWT token
             access_token = create_access_token(
-                identity="admin",
-                additional_claims={"role": "admin"},
-                expires_delta=timedelta(days=1)
+                identity="470@gmail.com",  # Use email as identity
+                additional_claims={
+                    "role": "admin",
+                    "email": "470@gmail.com"
+                },
+                expires_delta=timedelta(days=7)  # Extend token validity to 7 days
             )
             
             return jsonify({
@@ -449,38 +452,43 @@ def verify_token():
         from flask_jwt_extended import decode_token
         
         try:
-            # Try to decode as a regular user token
+            # Try to decode token
             decoded = decode_token(token)
-            user_id = decoded.get('sub')  # 'sub' is where identity is stored
-            
-            if user_id:
-                client = current_app.mongo_client
-                db = client.get_database()
-                users_collection = db.users
-                
-                user = users_collection.find_one({"_id": ObjectId(user_id)})
-                if not user:
-                    return jsonify({'error': 'User not found'}), 404
-                
-                user_info = {
-                    'id': str(user['_id']),
-                    'email': user['email'],
-                    'name': user['name']
-                }
-                
-                return jsonify({'user': user_info, 'valid': True, 'admin': False}), 200
-            
-            # If no user_id found, check if it's an admin token
             role = decoded.get('role')
-            if role == 'admin':
+            identity = decoded.get('sub')
+            
+            # Check if it's an admin token
+            if role == 'admin' and identity == '470@gmail.com':
                 return jsonify({
                     'admin': {
                         'email': '470@gmail.com',
                         'role': 'admin'
                     },
                     'valid': True,
-                    'admin': True
+                    'admin': True,
+                    'access_token': token  # Return the token back for reuse
                 }), 200
+            
+            # If not admin, check if it's a regular user
+            if identity:
+                client = current_app.mongo_client
+                db = client.get_database()
+                users_collection = db.users
+                
+                # For regular users, try to find by ObjectId first
+                try:
+                    user = users_collection.find_one({"_id": ObjectId(identity)})
+                except:
+                    # If not ObjectId, try finding by email
+                    user = users_collection.find_one({"email": identity})
+                
+                if user:
+                    user_info = {
+                        'id': str(user['_id']),
+                        'email': user['email'],
+                        'name': user['name']
+                    }
+                    return jsonify({'user': user_info, 'valid': True, 'admin': False}), 200
             
             return jsonify({'error': 'Invalid token payload'}), 401
             

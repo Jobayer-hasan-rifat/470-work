@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides details on the real-time messaging system implemented for the BRACU Circle platform. The system enables users to contact post creators in both the Marketplace and Ride Share sections, with real-time updates and message history.
+This document provides details on the real-time messaging system implemented for the BRACU Circle platform. The system enables users to contact post creators in the Marketplace, Ride Share, and Bus Booking sections, with real-time updates and message history.
 
 ## Features
 
@@ -86,6 +86,24 @@ eventlet==0.33.3
 ```
 socket.io-client==4.8.1
 ```
+
+### Running the Messaging System
+
+1. The messaging system is integrated with the main application. Follow the setup instructions in the main README.md file to set up the backend and frontend.
+
+2. The backend server will automatically start the WebSocket server when you run:
+   ```bash
+   python run.py
+   ```
+   The server will use the default Flask-SocketIO port (typically 5000) or any available port if 5000 is in use.
+
+3. The frontend is configured to automatically connect to the backend regardless of which port it's running on.
+
+4. To test if the messaging system is working properly:
+   - Log in with two different user accounts in separate browser windows/tabs
+   - Navigate to a ride share or bus booking post created by one of the users
+   - From the other user account, click the "Contact" button to start a conversation
+   - Messages should appear in real-time for both users
 
 ## Testing
 

@@ -1,6 +1,6 @@
 # Bracu Circle
 
-A university student platform for marketplace, lost & found, and ride booking services.
+A university student platform for marketplace, lost & found, ride sharing, and bus booking services.
 
 ## Project Structure
 
@@ -74,6 +74,7 @@ bracu-circle/
    ```bash
    python run.py
    ```
+   The backend will start on the default Flask-SocketIO port (typically 5000) or any available port if 5000 is in use.
 
 ### Frontend Setup
 
@@ -91,13 +92,18 @@ bracu-circle/
    ```bash
    npm start
    ```
+   The frontend will start on port 3000 by default. The application is configured to automatically connect to the backend on any available port.
 
 ## Features
 
 - User Authentication
 - Marketplace (Buy/Sell/Swap)
 - Lost & Found
-- Ride Booking System
+- Ride Share & Bus Booking System
+  - Post rides for sharing with other students
+  - Book bus tickets for routes around BRAC University
+  - Real-time messaging with ride/bus post creators
+  - Manage bookings through user dashboard
 
 ## API Endpoints
 

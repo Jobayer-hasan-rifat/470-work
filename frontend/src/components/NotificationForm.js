@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import {
   Box,
   TextField,
@@ -24,7 +25,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import CloseIcon from '@mui/icons-material/Close';
 import notificationService from '../services/notificationService';
 
-function NotificationForm() {
+function NotificationForm({ adminToken }) {
   const [formData, setFormData] = useState({
     message: '',
     page: 'ride_share'
@@ -36,6 +37,7 @@ function NotificationForm() {
   const [editingId, setEditingId] = useState(null);
 
   const pageOptions = [
+    { value: 'home', label: 'Homepage' },
     { value: 'ride_share', label: 'Ride Share' },
     { value: 'lost_found', label: 'Lost & Found' },
     { value: 'marketplace', label: 'Marketplace' }
@@ -49,7 +51,20 @@ function NotificationForm() {
     try {
       setLoading(true);
       setError('');
-      const data = await notificationService.getAllNotifications();
+      
+      // Use the provided admin token for authentication
+      const config = {
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      // Add a timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/notifications?_=${timestamp}`, config);
+      const data = response.data;
+      
       if (Array.isArray(data)) {
         setNotifications(data);
       } else {
@@ -57,7 +72,7 @@ function NotificationForm() {
       }
     } catch (err) {
       console.error('Error loading notifications:', err);
-      setError('Failed to load notifications: ' + (err.message || 'Unknown error'));
+      setError('Failed to load notifications: ' + (err.response?.data?.error || err.message || 'Unknown error'));
       setNotifications([]);
     } finally {
       setLoading(false);
@@ -84,11 +99,19 @@ function NotificationForm() {
       setError('');
       setSuccess('');
       
+      // Use the provided admin token for authentication
+      const config = {
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      
       if (editingId) {
-        await notificationService.updateNotification(editingId, formData);
+        await axios.put(`/api/notifications/${editingId}`, formData, config);
         setSuccess('Notification updated successfully!');
       } else {
-        await notificationService.createNotification(formData);
+        await axios.post('/api/notifications', formData, config);
         setSuccess('Notification created successfully!');
       }
 
@@ -104,7 +127,7 @@ function NotificationForm() {
     } catch (error) {
       console.error('Error submitting notification:', error);
       setSuccess('');
-      setError(error.message || 'Failed to save notification. Please try again.');
+      setError(error.response?.data?.error || error.message || 'Failed to save notification. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -130,7 +153,15 @@ function NotificationForm() {
       setError('');
       setSuccess('');
       
-      await notificationService.deactivateNotification(id);
+      // Use the provided admin token for authentication
+      const config = {
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        }
+      };
+      
+      await axios.delete(`/api/notifications/${id}`, config);
       setSuccess('Notification deleted successfully!');
       
       // Clear form if we're editing the notification that was just deleted
@@ -146,7 +177,7 @@ function NotificationForm() {
     } catch (error) {
       console.error('Error deleting notification:', error);
       setSuccess('');
-      setError('Failed to delete notification: ' + (error.message || 'Please try again'));
+      setError('Failed to delete notification: ' + (error.response?.data?.error || error.message || 'Please try again'));
     } finally {
       setLoading(false);
     }

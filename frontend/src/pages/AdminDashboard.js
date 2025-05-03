@@ -39,6 +39,8 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import MenuIcon from '@mui/icons-material/Menu';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import CloseIcon from '@mui/icons-material/Close';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
 import '../AppBackgrounds.css';
 import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDrawer';
@@ -246,22 +248,40 @@ const AdminDashboard = () => {
         }
       }));
       
-      setRideShareItems(ridesWithUserInfo || []);
-      setLastFetched(prev => ({ ...prev, rideshare: Date.now() }));
+      // Filter out any ride shares that are marked as deleted in local storage
+      const deletedRideShares = JSON.parse(localStorage.getItem('deletedRideShares') || '[]');
+      const ridesWithUserInfoFinal = (response.data || []).filter(ride => 
+        !deletedRideShares.includes(ride._id)
+      );
+      
+      console.log('Filtered out', response.data.length - ridesWithUserInfoFinal.length, 'deleted ride shares');
+      setRideShareItems(ridesWithUserInfoFinal);
+      setLastFetched(prev => ({ ...(prev || {}), rideshare: Date.now() }));
+      
+      // Calculate ride share statistics
+      const activeRides = ridesWithUserInfoFinal.filter(ride => ride.status === 'active').length || 0;
+      const inactiveRides = ridesWithUserInfoFinal.filter(ride => ride.status !== 'active').length || 0;
+      const totalRides = ridesWithUserInfoFinal.length || 0;
+      
+      console.log('Ride share stats:', { total_posts: totalRides, active: activeRides, inactive: inactiveRides });
       
       // Update stats with the new ride share data
-      setStats(prev => ({
-        ...prev,
-        rideshare: {
-          total_posts: ridesWithUserInfo.length || 0,
-          active: ridesWithUserInfo.filter(ride => ride.status === 'active').length || 0,
-          inactive: ridesWithUserInfo.filter(ride => ride.status !== 'active').length || 0
-        },
-        recent_activities: {
-          ...prev.recent_activities,
-          rideshare: ridesWithUserInfo.slice(0, 5) || []
-        }
-      }));
+      setStats(prev => {
+        // Handle case where prev is null by providing default values
+        const prevStats = prev || { recent_activities: {} };
+        return {
+          ...prevStats,
+          rideshare: {
+            total_posts: totalRides,
+            active: activeRides,
+            inactive: inactiveRides
+          },
+          recent_activities: {
+            ...prevStats.recent_activities,
+            rideshare: ridesWithUserInfo.slice(0, 5) || []
+          }
+        };
+      });
     } catch (err) {
       console.error('Error fetching ride share posts:', err);
       let errorMsg = err.response?.data?.error || err.message;
@@ -314,22 +334,34 @@ const AdminDashboard = () => {
   const handleDeleteRideShareConfirm = async () => {
     if (!rideShareToDelete) return;
     setActionLoading(true);
+    
+    // Close the dialog immediately for better UX
+    setDeleteRideShareConfirmOpen(false);
+    
     try {
+      // Get the admin token
       const adminToken = localStorage.getItem('adminToken');
-      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
-      // Use the correct API endpoint for deleting ride shares
-      const response = await axios.delete(`/api/ride/share/${rideShareToDelete._id}`);
       
-      setSnackbar({
-        open: true,
-        message: response.data.message || 'Ride share post deleted successfully',
-        severity: 'success'
+      if (!adminToken) {
+        throw new Error('Admin token not found. Please log in again.');
+      }
+      
+      // First attempt to delete from the backend
+      const response = await axios({
+        method: 'DELETE',
+        url: `/api/ride/share/${rideShareToDelete._id}`,
+        headers: {
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json'
+        }
       });
       
-      // Update the UI immediately
+      console.log('Backend deletion successful:', response.data);
+      
+      // Only update the UI after successful backend deletion
       setRideShareItems(prev => prev.filter(item => item._id !== rideShareToDelete._id));
       
-      // Update stats
+      // Update stats after successful deletion
       setStats(prev => {
         const isActive = rideShareToDelete.status === 'active';
         return {
@@ -347,19 +379,48 @@ const AdminDashboard = () => {
         };
       });
       
-      setDeleteRideShareConfirmOpen(false);
-      setRideShareToDelete(null);
+      // Also mark as deleted in local storage to ensure it stays deleted across page refreshes
+      const deletedRideShares = JSON.parse(localStorage.getItem('deletedRideShares') || '[]');
+      if (!deletedRideShares.includes(rideShareToDelete._id)) {
+        deletedRideShares.push(rideShareToDelete._id);
+        localStorage.setItem('deletedRideShares', JSON.stringify(deletedRideShares));
+      }
       
-      // Refresh data to ensure consistency
-      await fetchRideShareData(true);
+      // Show success message
+      setSnackbar({
+        open: true,
+        message: response.data.message || 'Ride share post deleted successfully',
+        severity: 'success'
+      });
+      
+      // Broadcast the deletion to other components using localStorage event
+      // This will notify the RideBooking page to refresh its data
+      const deleteEvent = {
+        type: 'RIDE_SHARE_DELETED',
+        rideId: rideShareToDelete._id,
+        timestamp: new Date().getTime()
+      };
+      localStorage.setItem('rideShareDeleteEvent', JSON.stringify(deleteEvent));
+      // Trigger a storage event for other tabs/components to detect
+      window.dispatchEvent(new Event('storage'));
+      
+      // Refresh all dashboard data to ensure consistency across the entire admin dashboard
+      fetchDashboardData(true);
+      fetchMarketplaceData(true);
+      fetchRideShareData(true);
+      
     } catch (err) {
       console.error('Error deleting ride share:', err);
+      
+      // Show error message
       setSnackbar({
         open: true,
         message: err.response?.data?.error || err.message,
         severity: 'error'
       });
     } finally {
+      // Reset the state
+      setRideShareToDelete(null);
       setActionLoading(false);
     }
   };
@@ -417,6 +478,23 @@ const AdminDashboard = () => {
   };
 
   // Call fetchRideShareData when needed (e.g., on mount or when switching views)
+  useEffect(function() {
+    // Initial data fetch
+    fetchDashboardData();
+    fetchMarketplaceData();
+    fetchRideShareData(true); // Force fetch ride share data on mount
+    
+    // Set up interval to refresh data every 30 seconds
+    const interval = setInterval(() => {
+      fetchRideShareData(true);
+    }, 30000);
+    
+    // Clean up interval on unmount
+    return function() {
+      clearInterval(interval);
+    };
+  }, []);
+
   useEffect(() => {
     if (activeView === 'rideshare') fetchRideShareData();
     if (activeView === 'marketplace') fetchMarketplaceData();
@@ -445,19 +523,22 @@ const AdminDashboard = () => {
       const timestamp = new Date().getTime();
       const response = await axiosGetWithRetry(`/api/marketplace/items?_=${timestamp}`);
       setMarketplaceItems(response.data || []);
-      setLastFetched(prev => ({ ...prev, marketplace: Date.now() }));
+      setLastFetched(prev => ({ ...(prev || {}), marketplace: Date.now() }));
       
       // Update stats with the new marketplace data
-      setStats(prev => ({
-        ...prev,
-        marketplace: {
-          total_items: response.data?.length || 0
-        },
-        recent_activities: {
-          ...prev.recent_activities,
-          items: response.data?.slice(0, 5) || [] // Show only 5 most recent items
-        }
-      }));
+      setStats(prev => {
+        const prevStats = prev || { recent_activities: {} };
+        return {
+          ...prevStats,
+          marketplace: {
+            total_items: response.data?.length || 0
+          },
+          recent_activities: {
+            ...prevStats.recent_activities,
+            items: response.data?.slice(0, 5) || [] // Show only 5 most recent items
+          }
+        };
+      });
     } catch (err) {
       console.error('Error fetching marketplace items:', err);
       let errorMsg = err.response?.data?.error || err.message;
@@ -724,7 +805,8 @@ const AdminDashboard = () => {
       const defaultStats = {
         users: { total: 0, verified: 0, pending: 0 },
         marketplace: { total_items: 0 },
-        recent_activities: { items: [] }
+        rideshare: { total_posts: 0, active: 0, inactive: 0 },
+        recent_activities: { items: [], rideshare: [] }
       };
       
       try {
@@ -742,12 +824,18 @@ const AdminDashboard = () => {
         
         // Combine stats with real-time marketplace count
         const combinedStats = {
-          ...statsResponse.data,
+          ...defaultStats,  // Start with default values
+          ...statsResponse.data,  // Override with API response data
+          users: {
+            ...defaultStats.users,  // Start with default user stats
+            ...(statsResponse.data?.users || {})  // Override with API response user data if available
+          },
           marketplace: {
             total_items: marketplaceItemsCount
           },
           recent_activities: {
-            items: marketplaceResponse.data?.slice(0, 5) || [] // Show only 5 most recent items
+            items: marketplaceResponse.data?.slice(0, 5) || [], // Show only 5 most recent items
+            rideshare: statsResponse.data?.recent_activities?.rideshare || []
           }
         };
         
@@ -790,13 +878,16 @@ const AdminDashboard = () => {
         setPendingUsers(newPendingUsers);
         
         // Update stats with real pending count
-        setStats(prev => ({
-          ...prev,
-          users: {
-            ...prev.users,
-            pending: newPendingUsers.length || 0
-          }
-        }));
+        setStats(prev => {
+          const prevStats = prev || { users: {} };
+          return {
+            ...prevStats,
+            users: {
+              ...(prevStats.users || {}),
+              pending: newPendingUsers.length || 0
+            }
+          };
+        });
       } catch (pendingErr) {
         console.error("Error fetching pending users:", pendingErr);
         setPendingUsers([]);
@@ -811,9 +902,22 @@ const AdminDashboard = () => {
         // Add timestamp to prevent caching
         const verifiedTimestamp = new Date().getTime();
         
-        // Get verified users
+        // Get verified users with a timeout
         console.log("Fetching verified users...");
-        const verifiedResponse = await axiosGetWithRetry(`/api/admin/verified-users?_=${verifiedTimestamp}`);
+        
+        // Create a timeout promise that rejects after 10 seconds
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error('Request timed out after 10 seconds'));
+          }, 10000);
+        });
+        
+        // Race the actual request against the timeout
+        const verifiedResponse = await Promise.race([
+          axiosGetWithRetry(`/api/admin/verified-users?limit=50&_=${verifiedTimestamp}`),
+          timeoutPromise
+        ]);
+        
         console.log("Verified users response:", verifiedResponse.data);
         
         // Check if there are changes in the verified users list
@@ -831,25 +935,43 @@ const AdminDashboard = () => {
           console.log('Detected deleted users that were still in UI:', deletedUsers);
         }
         
+        // Update the verified users list
         setVerifiedUsers(newVerifiedUsers);
         
         // Update stats with real verified count
-        setStats(prev => ({
-          ...prev,
-          users: {
-            ...prev.users,
-            verified: newVerifiedUsers.length || 0,
-            total: (newVerifiedUsers.length || 0) + (prev.users.pending || 0)
-          }
-        }));
+        setStats(prev => {
+          const prevStats = prev || { users: {} };
+          return {
+            ...prevStats,
+            users: {
+              ...(prevStats.users || {}),
+              verified: newVerifiedUsers.length || 0,
+              total: (newVerifiedUsers.length || 0) + ((prevStats.users?.pending || 0))
+            }
+          };
+        });
       } catch (verifiedErr) {
         console.error("Error fetching verified users:", verifiedErr);
-        setVerifiedUsers([]);
-        setSnackbar({
-          open: true,
-          message: `Failed to load verified users: ${verifiedErr.response?.data?.error || verifiedErr.message}`,
-          severity: 'error'
-        });
+        
+        // Keep the existing verified users instead of setting to empty array
+        // This way, if the request fails, we still have some data to show
+        
+        // Only show the error message if we don't have any verified users yet
+        if (verifiedUsers.length === 0) {
+          setVerifiedUsers([]);
+          setSnackbar({
+            open: true,
+            message: `Failed to load verified users: ${verifiedErr.message}`,
+            severity: 'warning'
+          });
+        } else {
+          // Just show a warning toast but keep the existing data
+          setSnackbar({
+            open: true,
+            message: `Could not refresh verified users list. Using cached data.`,
+            severity: 'info'
+          });
+        }
       }
       
       return true;
@@ -1054,6 +1176,7 @@ const AdminDashboard = () => {
   const safeStats = stats || {
     users: { total: 0, verified: 0, pending: 0 },
     marketplace: { total_items: 0 },
+    rideshare: { total_posts: 0, active: 0, inactive: 0 },
     recent_activities: { items: [] }
   };
 
@@ -1198,8 +1321,102 @@ const AdminDashboard = () => {
     </div>
   );
 
+  // Function to render ride share stats card using pure JavaScript
+  const renderRideShareCard = () => {
+    // Create a safe stats object with default values if not available
+    const safeStats = {
+      rideshare: { total_posts: 0, active: 0 },
+      ...(stats || {})
+    };
+    const rideShareCount = safeStats.rideshare?.total_posts || 0;
+    const activeRideShares = safeStats.rideshare?.active || 0;
+    
+    return React.createElement(Grid, { item: true, xs: 12, sm: 6, md: 4 }, 
+      React.createElement(Card, { sx: { backgroundColor: '#e8f5e9', borderRadius: '12px', height: '100%' } }, 
+        React.createElement(CardContent, null, [
+          React.createElement(Typography, { variant: "h6", color: "#2e7d32", key: 'title' }, "Ride Share Posts"),
+          React.createElement(Typography, { variant: "h3", sx: { my: 1, fontWeight: 600 }, key: 'count' }, rideShareCount),
+          React.createElement(Box, { sx: { display: 'flex', alignItems: 'center' }, key: 'info' }, [
+            React.createElement(DirectionsBusIcon, { fontSize: "small", color: "success", key: 'icon' }),
+            React.createElement(Typography, { variant: "body2", sx: { ml: 1 }, key: 'active-count' }, activeRideShares + " Active posts")
+          ])
+        ])
+      )
+    );
+  };
+  
+  // Function to render ride share activity list using pure JavaScript
+  const renderRideShareActivity = () => {
+    // Create a safe stats object with default values if not available
+    const safeStats = {
+      recent_activities: { rideshare: [] },
+      ...(stats || {})
+    };
+    const rideShares = safeStats.recent_activities?.rideshare || [];
+    
+    const listItems = rideShares.length > 0 
+      ? rideShares.map((ride, index) => {
+          return React.createElement(ListItem, { key: ride._id || index, divider: index < rideShares.length - 1 }, [
+            React.createElement(ListItemAvatar, { key: 'avatar' }, 
+              React.createElement(Avatar, { sx: { bgcolor: ride.status === 'active' ? 'success.light' : 'grey.400' } }, 
+                React.createElement(DirectionsBusIcon)
+              )
+            ),
+            React.createElement(ListItemText, { 
+              key: 'text',
+              primary: `${ride.from_location || 'Unknown'} to ${ride.to_location || 'Unknown'}`,
+              secondary: `${ride.date || 'No date'} | ${ride.time || 'No time'} | ${ride.seats_available || '0'} seats | Posted by: ${ride.user?.name || 'Unknown'}`
+            }),
+            React.createElement('div', { key: 'actions', style: { display: 'flex' } }, [
+              React.createElement(IconButton, { 
+                key: 'edit', 
+                edge: 'end', 
+                'aria-label': 'edit', 
+                onClick: () => handleEditRideShare(ride)
+              }, React.createElement(EditIcon, { fontSize: 'small' })),
+              React.createElement(IconButton, { 
+                key: 'delete', 
+                edge: 'end', 
+                'aria-label': 'delete', 
+                onClick: () => handleDeleteRideShare(ride)
+              }, React.createElement(DeleteIcon, { fontSize: 'small' }))
+            ])
+          ]);
+        })
+      : [React.createElement(ListItem, { key: 'no-rides' }, 
+          React.createElement(ListItemText, { primary: 'No recent ride share posts' })
+        )];
+    
+    return React.createElement('div', null, [
+      React.createElement(Typography, { variant: 'subtitle1', sx: { mt: 4, mb: 2 }, key: 'title' }, 'Latest Ride Share Posts'),
+      React.createElement(Box, { sx: { bgcolor: 'background.paper', borderRadius: 2, overflow: 'hidden' }, key: 'list-container' },
+        React.createElement(List, { dense: true }, listItems)
+      )
+    ]);
+  };
+  
+  // Ensure stats is never null or undefined
+  useEffect(() => {
+    if (!stats) {
+      setStats({
+        users: { total: 0, verified: 0, pending: 0 },
+        marketplace: { total_items: 0 },
+        rideshare: { total_posts: 0, active: 0, inactive: 0 },
+        recent_activities: { items: [], rideshare: [] }
+      });
+    }
+  }, [stats]);
+
   // Render different content based on active view
   const renderContent = () => {
+    // Create a safe stats object with default values if not available
+    const safeStats = {
+      users: { total: 0, verified: 0, pending: 0 },
+      marketplace: { total_items: 0 },
+      rideshare: { total_posts: 0, active: 0, inactive: 0 },
+      recent_activities: { items: [], rideshare: [] },
+      ...(stats || {})
+    };
     if (activeView === 'notifications') {
       return (
         <Box sx={{ mt: 2 }}>
@@ -1213,7 +1430,7 @@ const AdminDashboard = () => {
                 <CloseIcon />
               </IconButton>
             </Box>
-            <NotificationForm />
+            <NotificationForm adminToken={localStorage.getItem('adminToken')} />
           </Paper>
         </Box>
       );
@@ -1339,18 +1556,7 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12} sm={6} md={4}>
-                <Card sx={{ backgroundColor: '#e8f5e9', borderRadius: '12px', height: '100%' }}>
-                  <CardContent>
-                    <Typography variant="h6" color="#388e3c">Ride Share Posts</Typography>
-                    <Typography variant="h3" sx={{ my: 1, fontWeight: 600 }}>{safeStats.rideshare?.total_posts || 0}</Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <DirectionsBusIcon color="success" />
-                      <Typography variant="body2" sx={{ ml: 1 }}>Active posts</Typography>
-                    </Box>
-                  </CardContent>
-                </Card>
-              </Grid>
+              {renderRideShareCard()}
             </Grid>
 
             {/* Recent activities section */}
@@ -1381,26 +1587,7 @@ const AdminDashboard = () => {
                     <Typography variant="body2" color="text.secondary">No recent marketplace items</Typography>
                   )}
                   <Divider sx={{ my: 2 }} />
-                  <Typography variant="subtitle1" sx={{ mb: 1 }}>Latest Ride Share Posts</Typography>
-                  {safeStats.recent_activities.rideshare && safeStats.recent_activities.rideshare.length > 0 ? (
-                    <List sx={{ width: '100%' }}>
-                      {safeStats.recent_activities.rideshare.map((item) => (
-                        <ListItem key={item._id} divider>
-                          <ListItemAvatar>
-                            <Avatar sx={{ bgcolor: '#388e3c' }}>
-                              <DirectionsBusIcon />
-                            </Avatar>
-                          </ListItemAvatar>
-                          <ListItemText
-                            primary={item.title}
-                            secondary={`From: ${item.origin} → To: ${item.destination}`}
-                          />
-                        </ListItem>
-                      ))}
-                    </List>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">No recent ride share posts</Typography>
-                  )}
+                  {renderRideShareActivity()}
                 </Paper>
               </Grid>
             </Grid>

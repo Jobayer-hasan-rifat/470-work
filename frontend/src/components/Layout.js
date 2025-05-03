@@ -27,6 +27,9 @@ import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 
+// Import components
+import AnnouncementBanner from './AnnouncementBanner';
+
 // Import CSS styles
 import '../styles/components/Layout.css';
 
@@ -298,6 +301,9 @@ const Layout = () => {
           zIndex: 1
         }}
       >
+        {/* Display announcements for logged-in users */}
+        {isLoggedIn && <AnnouncementBanner />}
+        
         <Outlet />
       </Container>
     </>

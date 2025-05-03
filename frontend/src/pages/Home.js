@@ -1,4 +1,5 @@
 import React, { memo, useEffect } from 'react';
+import withNotificationBanner from '../components/withNotificationBanner';
 import { 
   Box, 
   Typography, 
@@ -294,4 +295,4 @@ const Home = () => {
   );
 };
 
-export default memo(Home);
+export default withNotificationBanner(memo(Home), 'home');

@@ -15,6 +15,7 @@ const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const AdminLogin = lazy(() => import('./pages/AdminLogin'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AdminAnnouncement = lazy(() => import('./pages/AdminAnnouncement'));
 const UserProfile = lazy(() => import('./pages/UserProfile'));
 const Marketplace = lazy(() => import('./pages/Marketplace'));
 const Payment = lazy(() => import('./pages/Payment'));
@@ -110,6 +111,12 @@ function App() {
             <Route path="/admin-dashboard" element={
               <AdminRoute>
                 <AdminDashboard />
+              </AdminRoute>
+            } />
+            
+            <Route path="/admin/announcements" element={
+              <AdminRoute>
+                <AdminAnnouncement />
               </AdminRoute>
             } />
             

@@ -309,6 +309,15 @@ def get_statistics():
         total_share_rides = db.share_rides.count_documents({})
         active_share_rides = db.share_rides.count_documents({'status': 'active'})
         inactive_share_rides = db.share_rides.count_documents({'status': {'$ne': 'active'}})
+        
+        # Get recent ride share posts
+        recent_share_rides = list(db.share_rides.find().sort('created_at', -1).limit(5))
+        # Convert ObjectId to string for recent share rides
+        for ride in recent_share_rides:
+            if '_id' in ride:
+                ride['_id'] = str(ride['_id'])
+            if 'user_id' in ride:
+                ride['user_id'] = str(ride['user_id'])
 
         # Get recent activities
         recent_bookings = list(db.bookings.find().sort('created_at', -1).limit(5))
@@ -355,9 +364,16 @@ def get_statistics():
                 'active': active_share_rides,
                 'inactive': inactive_share_rides
             },
+            # Add rideshare property to match frontend expectations
+            'rideshare': {
+                'total_posts': total_share_rides,
+                'active': active_share_rides,
+                'inactive': inactive_share_rides
+            },
             'recent_activities': {
                 'bookings': recent_bookings,
-                'items': recent_items
+                'items': recent_items,
+                'rideshare': recent_share_rides
             }
         })
         response.headers['Cache-Control'] = 'max-age=60'

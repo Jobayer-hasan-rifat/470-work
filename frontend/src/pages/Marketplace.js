@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import withNotificationBanner from '../components/withNotificationBanner';
 import { 
   Container, 
   Typography, 
@@ -48,13 +49,14 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CheckIcon from '@mui/icons-material/Check';
 import axios from 'axios';
 import '../AppBackgrounds.css';
+import { getItemImage } from '../utils/imageUtils';
 
 const Marketplace = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const currentUserId = localStorage.getItem('userId') || '';
-const currentUserEmail = localStorage.getItem('email') || '';
+  const currentUserId = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user'))._id || JSON.parse(localStorage.getItem('user')).id : '';
+  const currentUserEmail = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')).email : '';
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState({
     category: '',
@@ -119,13 +121,56 @@ const currentUserEmail = localStorage.getItem('email') || '';
   // State for chat dialog seller info
   const [chatSeller, setChatSeller] = useState(null);
 
-  // Placeholder for sending a message
-  const handleSendMessage = () => {
-    if (!chatMessage.trim()) return;
-    // Here you would send the message to the backend/chat system
-    alert(`Message sent to ${chatSeller?.name}: ${chatMessage}`);
-    setChatMessage("");
-    setOpenChatDialog(false);
+  // Send message to seller
+  const handleSendMessage = async () => {
+    if (!chatMessage.trim() || !chatSeller || !selectedItem) {
+      setNotification({
+        open: true,
+        message: 'Please enter a message',
+        severity: 'error'
+      });
+      return;
+    }
+    
+    try {
+      const token = localStorage.getItem('token');
+      const user = JSON.parse(localStorage.getItem('user'));
+      
+      // Get the user IDs properly
+      const senderId = user._id || user.id;
+      const receiverId = chatSeller._id || chatSeller.id;
+      
+      console.log('Sending message to:', chatSeller);
+      console.log('About item:', selectedItem);
+      
+      // Send message using the messages API endpoint for marketplace posts
+      const response = await axios.post(
+        `http://localhost:5000/api/marketplace/messages/post/marketplace/${selectedItem._id}/user/${receiverId}`,
+        { content: chatMessage },
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      
+      setNotification({
+        open: true,
+        message: `Message sent to ${chatSeller.name}`,
+        severity: 'success'
+      });
+      
+      setChatMessage('');
+      setOpenChatDialog(false);
+    } catch (err) {
+      console.error('Error sending message:', err);
+      setNotification({
+        open: true,
+        message: `Failed to send message: ${err.response?.data?.error || err.message}`,
+        severity: 'error'
+      });
+    }
   };
 
   const handleBuyNow = (item) => {
@@ -174,7 +219,12 @@ const currentUserEmail = localStorage.getItem('email') || '';
     }
     
     // Try to get items from API first, fallback to localStorage
-    axios.get('/api/marketplace/items')
+    const token = localStorage.getItem('token');
+    axios.get('http://localhost:5000/api/marketplace/items', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
       .then(response => {
         // Ensure each item has a seller and createdAt
         const itemsWithSeller = response.data.map(item => ({
@@ -274,7 +324,7 @@ const currentUserEmail = localStorage.getItem('email') || '';
     
     // Send to API
     const token = localStorage.getItem('token');
-    axios.post('/api/marketplace/items', formData, {
+    axios.post('http://localhost:5000/api/marketplace/items', formData, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data'
@@ -286,12 +336,22 @@ const currentUserEmail = localStorage.getItem('email') || '';
       // Ensure price is always present
       if (typeof newItemData.price === 'undefined') newItemData.price = safePrice;
       
-      // Update local state
-      setItems(prev => [newItemData, ...prev]);
+      // Ensure the new item has a seller property
+      const newItemWithSeller = {
+        ...newItemData,
+        seller: newItemData.seller || {
+          id: localStorage.getItem('userId') || '',
+          name: localStorage.getItem('userName') || 'Current User',
+          email: localStorage.getItem('userEmail') || ''
+        }
+      };
+      
+      // Update local state immediately
+      setItems(prev => [newItemWithSeller, ...prev]);
       
       // Also update localStorage
       const existingItems = JSON.parse(localStorage.getItem('marketplaceItems') || '[]');
-      localStorage.setItem('marketplaceItems', JSON.stringify([newItemData, ...existingItems]));
+      localStorage.setItem('marketplaceItems', JSON.stringify([newItemWithSeller, ...existingItems]));
       
       // Reset the form and close the dialog
       setNewItem({
@@ -311,9 +371,6 @@ const currentUserEmail = localStorage.getItem('email') || '';
         message: 'Item added successfully!',
         severity: 'success'
       });
-      
-      // Refresh items to ensure consistency with backend
-      fetchItems(false);
     })
     .catch(error => {
       console.error('Error adding item:', error);
@@ -488,7 +545,7 @@ const currentUserEmail = localStorage.getItem('email') || '';
               React.createElement(CardMedia, {
                 component: "img",
                 height: "200",
-                image: item.images?.[0] || "https://via.placeholder.com/300x200?text=No+Image",
+                image: getItemImage(item, "https://via.placeholder.com/300x200?text=No+Image"),
                 alt: item.title
               }),
               React.createElement(CardContent, { sx: { flexGrow: 1 } },
@@ -507,7 +564,13 @@ const currentUserEmail = localStorage.getItem('email') || '';
                   React.createElement(Chip, { 
                     label: item.condition, 
                     size: "small",
-                    color: "secondary"
+                    color: "secondary",
+                    sx: { mr: 1 }
+                  }),
+                  item.status === 'sold' && React.createElement(Chip, {
+                    label: "SOLD",
+                    size: "small",
+                    color: "error"
                   })
                 ),
                 React.createElement(Typography, { 
@@ -525,16 +588,31 @@ const currentUserEmail = localStorage.getItem('email') || '';
               ),
               React.createElement(Box, { sx: { p: 2, pt: 0, mt: 'auto' } },
                 React.createElement(Grid, { container: true, spacing: 1 },
-                  // Show different buttons based on whether the user is the creator
-                  item.seller?.email === currentUserEmail ?
+                  // Show different buttons based on whether the user is the creator or if the item is sold
+                  item.status === 'sold' ?
+                  [
+                    React.createElement(Grid, { item: true, xs: 12, key: 'soldItem' },
+                      React.createElement(Button, {
+                        size: "small",
+                        fullWidth: true,
+                        variant: "outlined",
+                        color: "error",
+                        disabled: true,
+                        onClick: () => handleViewDetails(item)
+                      }, "Item Sold - View Details")
+                    )
+                  ] :
+                  (item.seller?.email === currentUserEmail || 
+                   item.seller?.id === currentUserId || 
+                   item.user_id === currentUserId) ?
                   [
                     React.createElement(Grid, { item: true, xs: 12, key: 'yourItem' },
                       React.createElement(Button, {
                         size: "small",
                         fullWidth: true,
                         variant: "outlined",
-                        onClick: () => handleViewDetails(item)
-                      }, "You Listed This Item - View Details")
+                        disabled: true
+                      }, "You Listed This Item")
                     )
                   ] :
                   [
@@ -560,7 +638,9 @@ const currentUserEmail = localStorage.getItem('email') || '';
                         fullWidth: true,
                         variant: "outlined",
                         onClick: () => {
+                          // Set both the seller and the item for proper message sending
                           setChatSeller(item.seller);
+                          setSelectedItem(item);
                           setOpenChatDialog(true);
                         }
                       }, "Contact Seller")
@@ -602,7 +682,7 @@ const currentUserEmail = localStorage.getItem('email') || '';
               React.createElement(Box, { sx: { position: 'relative', width: '100%', height: 300 } },
                 selectedItem.images && selectedItem.images.length > 0 ?
                   React.createElement('img', {
-                    src: selectedItem.images[0],
+                    src: selectedItem.images[0] || "https://via.placeholder.com/300x200?text=No+Image",
                     alt: selectedItem.title,
                     style: {
                       width: '100%',
@@ -631,7 +711,10 @@ const currentUserEmail = localStorage.getItem('email') || '';
                         height: 60,
                         border: '1px solid #ddd',
                         cursor: 'pointer',
-                        '&:hover': { opacity: 0.8 }
+                        '&:hover': { opacity: 0.8 },
+                        backgroundImage: `url(${img})`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center'
                       }
                     },
                       React.createElement('img', {
@@ -669,10 +752,10 @@ const currentUserEmail = localStorage.getItem('email') || '';
               React.createElement(Divider, { sx: { my: 2 } }),
               React.createElement(Box, { sx: { mb: 2 } },
                 React.createElement(Typography, { variant: "subtitle2", gutterBottom: true },
-  "Seller: ",
-  React.createElement('span', { style: { fontWeight: 600, color: '#1976d2' } }, selectedItem.seller?.name || 'Unknown Seller'),
-  selectedItem.seller?.email ? ` (${selectedItem.seller.email})` : null
-),
+                  "Seller: ",
+                  React.createElement('span', { style: { fontWeight: 600, color: '#1976d2' } }, selectedItem.seller?.name || 'Unknown Seller'),
+                  selectedItem.seller?.email ? ` (${selectedItem.seller.email})` : null
+                ),
                 React.createElement(Typography, { variant: "body2", color: "text.secondary", gutterBottom: true },
                   "Posted on: ",
                   React.createElement('span', { style: { fontWeight: 500, color: '#333' } },
@@ -682,31 +765,44 @@ const currentUserEmail = localStorage.getItem('email') || '';
                   )
                 )
               ),
-              // Only show Buy Now and Contact Seller buttons if the item is not created by the current user (by email)
-(selectedItem.seller?.email && selectedItem.seller.email !== currentUserEmail) ?
-  React.createElement(React.Fragment, null,
-    React.createElement(Box, { sx: { mt: 3 } },
-      React.createElement(Button, {
-        variant: "contained",
-        size: "large",
-        fullWidth: true,
-        startIcon: React.createElement(ShoppingCartIcon),
-        onClick: () => handleBuyNow(selectedItem)
-      }, "Buy Now")
-    ),
-    React.createElement(Button, {
-      variant: "outlined",
-      size: "large",
-      fullWidth: true,
-      sx: { mt: 2 },
-      startIcon: React.createElement(ChatIcon),
-      onClick: () => {
-        setOpenDetailsDialog(false);
-        setChatSeller(selectedItem.seller);
-        setOpenChatDialog(true);
-      }
-    }, "Contact Seller")
-  ) : null
+              // Only show Buy Now and Contact Seller buttons if the item is not sold and not created by the current user
+              (!selectedItem.status || selectedItem.status !== 'sold') && 
+              (!selectedItem.seller?.email || 
+               !(selectedItem.seller?.email === currentUserEmail || 
+                 selectedItem.seller?.id === currentUserId || 
+                 selectedItem.user_id === currentUserId)) ?
+                React.createElement(React.Fragment, null,
+                  React.createElement(Box, { sx: { mt: 3 } },
+                    React.createElement(Button, {
+                      variant: "contained",
+                      size: "large",
+                      fullWidth: true,
+                      startIcon: React.createElement(ShoppingCartIcon),
+                      onClick: () => handleBuyNow(selectedItem)
+                    }, "Buy Now")
+                  ),
+                  React.createElement(Button, {
+                    variant: "outlined",
+                    size: "large",
+                    fullWidth: true,
+                    sx: { mt: 2 },
+                    startIcon: React.createElement(ChatIcon),
+                    onClick: () => {
+                      setOpenDetailsDialog(false);
+                      setChatSeller(selectedItem.seller);
+                      setOpenChatDialog(true);
+                    }
+                  }, "Contact Seller")
+                ) : 
+                React.createElement(Box, { sx: { mt: 3 } },
+                  React.createElement(Button, {
+                    variant: "outlined",
+                    size: "large",
+                    fullWidth: true,
+                    disabled: true,
+                    color: selectedItem.status === 'sold' ? "error" : "primary"
+                  }, selectedItem.status === 'sold' ? "Item Already Sold" : "You Listed This Item")
+                )
             )
           )
         )
@@ -921,4 +1017,4 @@ const currentUserEmail = localStorage.getItem('email') || '';
   );
 };
 
-export default Marketplace;
+export default withNotificationBanner(Marketplace, 'marketplace');

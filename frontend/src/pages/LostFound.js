@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import withNotificationBanner from '../components/withNotificationBanner';
 import {
   Box,
   Container,
@@ -1131,4 +1132,4 @@ const LostFound = () => {
   );
 };
 
-export default LostFound; 
+export default withNotificationBanner(LostFound, 'lost_found');

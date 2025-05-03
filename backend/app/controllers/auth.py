@@ -407,8 +407,10 @@ def admin_login():
             }), 200
 
         # If not hardcoded admin, check database
-        client = current_app.mongo_client
-        db = client.get_database()
+        # Use a direct connection to MongoDB instead of relying on the app's mongo_client
+        # This helps prevent timeouts by creating a fresh connection
+        client = MongoClient('mongodb://localhost:27017/')
+        db = client.bracu_circle
         users_collection = db.users
         
         admin_user = users_collection.find_one({

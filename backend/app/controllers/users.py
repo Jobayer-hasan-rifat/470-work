@@ -31,10 +31,6 @@ def get_user(user_id):
         # Get user's ID from JWT token for authorization
         token_user_id = get_jwt_identity()
         
-        # Only allow users to access their own data
-        if token_user_id != user_id:
-            return jsonify({"error": "Unauthorized access to user data"}), 403
-        
         # Get user data from database
         user = db.users.find_one({"_id": ObjectId(user_id)})
         if not user:
@@ -45,6 +41,19 @@ def get_user(user_id):
         
         # Convert ObjectId to string
         user['_id'] = str(user['_id'])
+        
+        # If requesting another user's data, only provide public information
+        if token_user_id != user_id:
+            # Create a limited user object with only public information
+            public_user = {
+                '_id': user['_id'],
+                'name': user.get('name', ''),
+                'email': user.get('email', ''),
+                'department': user.get('department', ''),
+                'profile_picture': user.get('profile_picture', None),
+                'verification_status': user.get('verification_status', 'pending')
+            }
+            user = public_user
 
         # Fix profile_picture and id_card_photo URLs
         if 'profile_picture' in user and user['profile_picture']:

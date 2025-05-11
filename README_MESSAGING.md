@@ -77,15 +77,51 @@ This document provides details on the real-time messaging system implemented for
 ### Backend Dependencies
 
 ```
+Flask==2.0.1
+Flask-JWT-Extended==4.3.1
 Flask-SocketIO==5.3.6
+Flask-CORS==3.0.10
+Flask-Compress==1.10.1
+Flask-Caching==1.10.1
+Flask-Limiter==1.4
+pymongo==4.0.1
+python-dotenv==0.19.0
+Werkzeug==2.0.1
 eventlet==0.33.3
+gunicorn==20.1.0
+Pillow==8.3.1
+python-socketio==5.4.0
 ```
 
 ### Frontend Dependencies
 
 ```
+react
+react-dom
+react-router-dom
+@mui/material
+@mui/icons-material
+axios
 socket.io-client==4.8.1
+react-scripts
 ```
+
+### System Requirements
+
+1. **MongoDB**: The project requires MongoDB to be installed and running
+   ```bash
+   # On Ubuntu
+   sudo systemctl start mongodb
+   
+   # On Windows
+   # MongoDB should be running as a service or can be started from MongoDB Compass
+   ```
+
+2. **Node.js and npm**: Required for the frontend (v14+ recommended)
+
+3. **Python**: Version 3.8+ recommended
+
+4. **Image Processing**: The Pillow library requires some system dependencies that might need to be installed separately depending on the OS
 
 ### Running the Messaging System
 

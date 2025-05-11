@@ -167,9 +167,7 @@ const Payment = () => {
           transactionId: paymentInfo.transactionId,
           [paymentInfo.paymentMethod + 'Number']: paymentInfo[paymentInfo.paymentMethod + 'Number']
         },
-        total_amount: parseFloat(item.price) + 
-          (paymentInfo.deliveryOption === 'standard' ? 60 : 
-           paymentInfo.deliveryOption === 'express' ? 120 : 0)
+        total_amount: parseFloat(item.price)
       };
 
       const token = localStorage.getItem('token');
@@ -184,17 +182,15 @@ const Payment = () => {
         setOrderReference(response.data.order_id);
         setOrderComplete(true);
         
-        // Show success message and redirect after a short delay
-        setTimeout(() => {
-          navigate('/marketplace', { 
-            state: { 
-              notification: {
-                message: 'Order placed successfully! The item has been marked as sold.',
-                severity: 'success'
-              }
+        // Show success message and redirect
+        navigate('/marketplace', { 
+          state: { 
+            notification: {
+              message: 'Order placed successfully! The item has been marked as sold.',
+              severity: 'success'
             }
-          });
-        }, 3000);
+          }
+        });
       }
     } catch (error) {
       setError(error.response?.data?.error || 'Failed to process payment. Please try again.');

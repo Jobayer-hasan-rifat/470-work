@@ -102,7 +102,8 @@ const Login = () => {
       localStorage.setItem('user', JSON.stringify(response.data.user));
       
       // Redirect to profile page instead of home page
-      navigate('/profile');
+      // Use replace instead of push to handle back button correctly
+      navigate('/profile', { replace: false });
     } catch (err) {
       console.error('Login error:', err);
       if (err.response?.data?.error === 'Your account is pending approval. Please check back later.') {

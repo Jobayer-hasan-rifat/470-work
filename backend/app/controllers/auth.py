@@ -19,6 +19,32 @@ auth_bp = Blueprint('auth_bp', __name__)
 # Use the application's mongo_client instead of creating a new connection
 user_model = User(None)  # Will be initialized properly when used with the correct database
 
+@auth_bp.route('/me', methods=['GET'])
+@jwt_required()
+def get_current_user():
+    try:
+        # Get the identity from the JWT token
+        current_user_id = get_jwt_identity()
+        
+        # Initialize the user model with the current app's database
+        from ..db import get_db
+        db = get_db()
+        user_model.db = db
+        
+        # Find the user by ID
+        user = user_model.find_by_id(current_user_id)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        # Remove sensitive information
+        user.pop('password', None)
+        
+        return jsonify(user), 200
+    except Exception as e:
+        current_app.logger.error(f"Error getting current user: {str(e)}")
+        return jsonify({'error': 'Failed to get user information'}), 500
+
 # Secret key for JWT
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key')
 
@@ -407,10 +433,8 @@ def admin_login():
             }), 200
 
         # If not hardcoded admin, check database
-        # Use a direct connection to MongoDB instead of relying on the app's mongo_client
-        # This helps prevent timeouts by creating a fresh connection
-        client = MongoClient('mongodb://localhost:27017/')
-        db = client.bracu_circle
+        client = current_app.mongo_client
+        db = client.get_database()
         users_collection = db.users
         
         admin_user = users_collection.find_one({

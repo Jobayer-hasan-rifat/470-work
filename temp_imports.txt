@@ -1,0 +1,27 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { jwtDecode as jwt_decode } from 'jwt-decode';
+import axios from 'axios';
+import { useNavigate, useParams } from 'react-router-dom';
+import MessageDisplay from '../components/MessageDisplay';
+import {
+  Container, Box, Paper, Typography, Avatar, Button, Tabs, Tab, List,
+  ListItem, ListItemText, ListItemAvatar, Divider, TextField, Chip,
+  CircularProgress, IconButton, Card, CardContent, CardMedia, Dialog, 
+  DialogTitle, DialogContent, DialogContentText, DialogActions, Snackbar, 
+  Alert, Badge, ListItemSecondaryAction, CardActions, Grid, Tooltip
+} from '@mui/material';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
+import CancelIcon from '@mui/icons-material/Cancel';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import StoreIcon from '@mui/icons-material/Store';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import LogoutIcon from '@mui/icons-material/Logout';
+import DeleteIcon from '@mui/icons-material/Delete';
+import MessageIcon from '@mui/icons-material/Message';
+import ChatIcon from '@mui/icons-material/Chat';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import AddIcon from '@mui/icons-material/Add';
+import '../AppBackgrounds.css';

@@ -1,5 +1,4 @@
 import React, { memo, useEffect } from 'react';
-import withNotificationBanner from '../components/withNotificationBanner';
 import { 
   Box, 
   Typography, 
@@ -10,7 +9,8 @@ import {
   Button 
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import DirectionsBusIcon from '@mui/icons-material/DirectionsBus';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import TwoWheelerIcon from '@mui/icons-material/TwoWheeler';
 import StoreIcon from '@mui/icons-material/Store';
 import PersonIcon from '@mui/icons-material/Person';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
@@ -93,7 +93,7 @@ const Home = () => {
     {
       title: 'Lost & Found',
       description: 'Report or find lost items around the campus.',
-      icon: <DirectionsBusIcon sx={{ fontSize: 70, color: '#2e7d32' }} />,
+      icon: <TwoWheelerIcon sx={{ fontSize: 70, color: '#2e7d32' }} />,
       path: '/lost-found',
       color: '#c8e6c9'
     },
@@ -107,7 +107,7 @@ const Home = () => {
     {
       title: 'Ride Sharing',
       description: 'Find or offer rides to and from campus with fellow students.',
-      icon: <DirectionsBusIcon sx={{ fontSize: 70, color: '#1565c0' }} />,
+      icon: <DirectionsCarIcon sx={{ fontSize: 70, color: '#1565c0' }} />,
       path: '/ride-booking',
       color: '#bbdefb'
     }
@@ -295,4 +295,4 @@ const Home = () => {
   );
 };
 
-export default withNotificationBanner(memo(Home), 'home');
+export default memo(Home);

@@ -13,9 +13,8 @@ class Message:
             "sender_id": ObjectId(data["sender_id"]),
             "receiver_id": ObjectId(data["receiver_id"]),
             "content": data["content"],
-            "post_id": ObjectId(data["post_id"]),
-            "post_type": data["post_type"],  # 'marketplace' or 'ride_share'
-            "attachment_url": data.get("attachment_url"),
+            "item_id": ObjectId(data["item_id"]) if data.get("item_id") else None,
+            "image_url": data.get("image_url"),  # Support for image attachments
             "read": False,
             "created_at": datetime.utcnow()
         }
@@ -58,71 +57,6 @@ class Message:
         return str(result.inserted_id) if result.inserted_id else None
 
     @staticmethod
-    def get_conversations_by_post(user_id, post_id, post_type):
-        """Get conversations related to a specific post"""
-        # Find messages related to this post
-        messages = list(db.messages.find({
-            "post_id": ObjectId(post_id),
-            "post_type": post_type,
-            "$or": [
-                {"sender_id": ObjectId(user_id)},
-                {"receiver_id": ObjectId(user_id)}
-            ]
-        }).sort("created_at", DESCENDING))
-        
-        # Extract unique conversation partners
-        conversation_partners = set()
-        for msg in messages:
-            if str(msg["sender_id"]) == user_id:
-                conversation_partners.add(str(msg["receiver_id"]))
-            else:
-                conversation_partners.add(str(msg["sender_id"]))
-        
-        # Get conversation details for each partner
-        conversations = []
-        for partner_id in conversation_partners:
-            # Get partner details
-            partner = db.users.find_one({"_id": ObjectId(partner_id)})
-            if not partner:
-                continue
-                
-            # Get latest message
-            latest_message = db.messages.find_one({
-                "post_id": ObjectId(post_id),
-                "post_type": post_type,
-                "$or": [
-                    {
-                        "sender_id": ObjectId(user_id),
-                        "receiver_id": ObjectId(partner_id)
-                    },
-                    {
-                        "sender_id": ObjectId(partner_id),
-                        "receiver_id": ObjectId(user_id)
-                    }
-                ]
-            }, sort=[("created_at", DESCENDING)])
-            
-            # Create conversation object
-            conversation = {
-                "_id": str(ObjectId()),  # Generate a unique ID
-                "participant1_id": user_id,
-                "participant2_id": partner_id,
-                "post_id": post_id,
-                "post_type": post_type,
-                "other_participant": {
-                    "id": partner_id,
-                    "name": partner.get("name", "Unknown"),
-                    "email": partner.get("email", "")
-                },
-                "last_message": latest_message["content"] if latest_message else "",
-                "last_message_time": latest_message["created_at"] if latest_message else datetime.utcnow()
-            }
-            
-            conversations.append(conversation)
-            
-        return sorted(conversations, key=lambda x: x["last_message_time"], reverse=True)
-        
-    @staticmethod
     def get_user_conversations(user_id):
         """Get all conversations for a user"""
         conversations = list(db.conversations.find({
@@ -131,32 +65,6 @@ class Message:
                 {"participant2_id": ObjectId(user_id)}
             ]
         }).sort("last_message_time", DESCENDING))
-        
-        # Get the latest message for each conversation
-        for conv in conversations:
-            # Get the latest message
-            latest_message = db.messages.find_one({
-                "$or": [
-                    {
-                        "sender_id": ObjectId(conv["participant1_id"]),
-                        "receiver_id": ObjectId(conv["participant2_id"])
-                    },
-                    {
-                        "sender_id": ObjectId(conv["participant2_id"]),
-                        "receiver_id": ObjectId(conv["participant1_id"])
-                    }
-                ]
-            }, sort=[("created_at", DESCENDING)])
-            
-            if latest_message:
-                conv["latest_message"] = {
-                    "content": latest_message["content"],
-                    "sender_id": str(latest_message["sender_id"]),
-                    "created_at": latest_message["created_at"],
-                    "post_type": latest_message.get("post_type", ""),
-                    "post_id": str(latest_message["post_id"]) if latest_message.get("post_id") else None,
-                    "attachment_url": latest_message.get("attachment_url")
-                }
         
         # Process conversations
         for conv in conversations:
@@ -180,15 +88,9 @@ class Message:
         return conversations
 
     @staticmethod
-    def get_conversation_messages(user_id, other_user_id, post_id=None):
-        """Get messages between two users
-        
-        Args:
-            user_id (str): The ID of the current user
-            other_user_id (str): The ID of the other user in the conversation
-            post_id (str, optional): If provided, filter messages by post_id
-        """
-        query = {
+    def get_conversation_messages(user_id, other_user_id):
+        """Get messages between two users"""
+        messages = list(db.messages.find({
             "$or": [
                 {
                     "sender_id": ObjectId(user_id),
@@ -199,21 +101,15 @@ class Message:
                     "receiver_id": ObjectId(user_id)
                 }
             ]
-        }
-        
-        # Add post_id filter if provided
-        if post_id:
-            query["post_id"] = ObjectId(post_id)
-            
-        messages = list(db.messages.find(query).sort("created_at", DESCENDING))
+        }).sort("created_at", 1))  # Sort in ascending order to show oldest messages first
         
         # Process messages
         for msg in messages:
             msg["_id"] = str(msg["_id"])
             msg["sender_id"] = str(msg["sender_id"])
             msg["receiver_id"] = str(msg["receiver_id"])
-            if msg.get("post_id"):
-                msg["post_id"] = str(msg["post_id"])
+            if "item_id" in msg and msg["item_id"]:
+                msg["item_id"] = str(msg["item_id"])
             
             # Mark message as read if user is receiver
             if str(msg["receiver_id"]) == user_id and not msg["read"]:
@@ -224,3 +120,44 @@ class Message:
                 msg["read"] = True
                 
         return messages
+
+    @staticmethod
+    def get_message_by_id(message_id):
+        """Get a message by its ID"""
+        try:
+            message = db.messages.find_one({"_id": ObjectId(message_id)})
+            if message:
+                message["_id"] = str(message["_id"])
+                message["sender_id"] = str(message["sender_id"])
+                message["receiver_id"] = str(message["receiver_id"])
+                if message.get("item_id"):
+                    message["item_id"] = str(message["item_id"])
+            return message
+        except Exception as e:
+            print(f"Error getting message: {str(e)}")
+            return None
+            
+    @staticmethod
+    def mark_message_read(message_id, user_id):
+        """Mark a message as read"""
+        try:
+            # Find the message and verify it belongs to the user
+            message = db.messages.find_one({
+                "_id": ObjectId(message_id),
+                "receiver_id": ObjectId(user_id),
+                "read": False
+            })
+            
+            if not message:
+                return False
+                
+            # Update the message
+            result = db.messages.update_one(
+                {"_id": ObjectId(message_id)},
+                {"$set": {"read": True}}
+            )
+            
+            return result.modified_count > 0
+        except Exception as e:
+            print(f"Error marking message as read: {str(e)}")
+            return False

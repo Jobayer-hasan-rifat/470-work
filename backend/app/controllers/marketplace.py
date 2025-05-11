@@ -72,18 +72,21 @@ def create_item():
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
         UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'uploads')
-        if not os.path.exists(UPLOAD_FOLDER):
-            os.makedirs(UPLOAD_FOLDER)
+        MARKETPLACE_FOLDER = os.path.join(UPLOAD_FOLDER, 'marketplace')
+        if not os.path.exists(MARKETPLACE_FOLDER):
+            os.makedirs(MARKETPLACE_FOLDER)
         # Handle multiple images
         images = request.files.getlist('images')
         image_urls = []
         for file in images[:3]:  # Limit to 3 images
             if file and file.filename != '':
                 filename = secure_filename(file.filename)
-                unique_filename = f"{uuid.uuid4()}_{filename}"
-                file_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+                # Create a timestamp-based filename to avoid conflicts
+                timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                unique_filename = f"{timestamp}_{filename}"
+                file_path = os.path.join(MARKETPLACE_FOLDER, unique_filename)
                 file.save(file_path)
-                image_urls.append(f"/uploads/{unique_filename}")
+                image_urls.append(f"/uploads/marketplace/{unique_filename}")
         if not image_urls:
             return jsonify({'error': 'No image(s) provided'}), 400
         item_data = {
@@ -230,14 +233,22 @@ def update_item(item_id):
                     if os.path.exists(old_image_path):
                         os.remove(old_image_path)
             
+            # Create marketplace folder if it doesn't exist
+            UPLOAD_FOLDER = current_app.config.get('UPLOAD_FOLDER', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'uploads'))
+            MARKETPLACE_FOLDER = os.path.join(UPLOAD_FOLDER, 'marketplace')
+            if not os.path.exists(MARKETPLACE_FOLDER):
+                os.makedirs(MARKETPLACE_FOLDER)
+            
             # Save new images
             for file in images[:3]:  # Limit to 3 images
                 if file and file.filename != '':
                     filename = secure_filename(file.filename)
-                    unique_filename = f"{uuid.uuid4()}_{filename}"
-                    file_path = os.path.join(current_app.config.get('UPLOAD_FOLDER', '../uploads'), unique_filename)
+                    # Create a timestamp-based filename to avoid conflicts
+                    timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                    unique_filename = f"{timestamp}_{filename}"
+                    file_path = os.path.join(MARKETPLACE_FOLDER, unique_filename)
                     file.save(file_path)
-                    image_urls.append(f"/uploads/{unique_filename}")
+                    image_urls.append(f"/uploads/marketplace/{unique_filename}")
             
             if image_urls:
                 update_data['images'] = image_urls

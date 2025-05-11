@@ -1,0 +1,2518 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { jwtDecode as jwt_decode } from 'jwt-decode';
+import axios from 'axios';
+import { useNavigate, useParams } from 'react-router-dom';
+import MessageDisplay from '../components/MessageDisplay';
+import {
+  Container, Box, Paper, Typography, Avatar, Button, Tabs, Tab, List,
+  ListItem, ListItemText, ListItemAvatar, Divider, TextField, Chip,
+  CircularProgress, IconButton, Card, CardContent, CardMedia, Dialog, 
+  DialogTitle, DialogContent, DialogContentText, DialogActions, Snackbar, 
+  Alert, Badge, ListItemSecondaryAction, CardActions, Grid, Tooltip
+} from '@mui/material';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
+import CancelIcon from '@mui/icons-material/Cancel';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
+import StoreIcon from '@mui/icons-material/Store';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import LogoutIcon from '@mui/icons-material/Logout';
+import DeleteIcon from '@mui/icons-material/Delete';
+import MessageIcon from '@mui/icons-material/Message';
+import ChatIcon from '@mui/icons-material/Chat';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import AddIcon from '@mui/icons-material/Add';
+import '../AppBackgrounds.css';
+// Temporary placeholder components until they are implemented
+const MarketplaceItemDetailsDrawer = ({ open, item, onClose }) => (
+  <Dialog open={open} onClose={onClose}>
+    <DialogTitle>Item Details</DialogTitle>
+    <DialogContent>
+      <Typography>{item?.title}</Typography>
+      <Typography>{item?.description}</Typography>
+      <Typography>Price: ${item?.price}</Typography>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={onClose}>Close</Button>
+    </DialogActions>
+  </Dialog>
+);
+
+const MarketplaceItemForm = ({ open, onClose, item, isEdit, onSuccess }) => (
+  <Dialog open={open} onClose={onClose}>
+    <DialogTitle>{isEdit ? 'Edit Item' : 'New Item'}</DialogTitle>
+    <DialogContent>
+      <Typography>Form placeholder</Typography>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={onClose}>Cancel</Button>
+      <Button onClick={() => onSuccess && onSuccess({})}>Save</Button>
+    </DialogActions>
+  </Dialog>
+);
+
+// MessageCenter component has been replaced with MessageDisplay component
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      // Try alternative endpoint
+      const response = await axios.get('/api/messages/conversations', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.data && Array.isArray(response.data)) {
+        console.log('Fallback method retrieved conversations:', response.data);
+        setConversations(response.data);
+      }
+    } catch (error) {
+      console.error('Fallback method also failed:', error);
+      // As a last resort, create some placeholder conversations for testing
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Creating placeholder conversations for development');
+        const placeholderConversations = [
+          {
+            _id: '1',
+            participant1_id: userId,
+            participant2_id: 'user123',
+            last_message: 'Hello, is this item still available?',
+            last_message_time: new Date().toISOString(),
+            other_participant: {
+              id: 'user123',
+              name: 'John Doe',
+              email: 'john@example.com'
+            }
+          },
+          {
+            _id: '2',
+            participant1_id: 'user456',
+            participant2_id: userId,
+            last_message: 'I am interested in your lost item post',
+            last_message_time: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+            other_participant: {
+              id: 'user456',
+              name: 'Jane Smith',
+              email: 'jane@example.com'
+            }
+          }
+        ];
+        setConversations(placeholderConversations);
+      }
+    }
+  };
+  
+  // Fetch all conversations for the current user
+  const fetchConversations = async () => {
+    setError(null);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token found');
+        setError('Authentication required. Please log in again.');
+        return;
+      }
+      
+      try {
+        const response = await axios.get('/api/messages/conversations', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          console.log('Retrieved conversations:', response.data);
+          setConversations(response.data);
+        }
+      } catch (apiError) {
+        console.error('Error fetching conversations from API:', apiError);
+        // Try fallback method
+        fetchConversationsFallback();
+      }
+    } catch (error) {
+      console.error('Error in fetchConversations:', error);
+      setError('Could not load your messages. Please try again later.');
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Fetch messages for a specific conversation
+  const fetchMessages = async (conversationId) => {
+    setLoadingMessages(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      const response = await axios.get(`/api/messages/conversation/${conversationId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.data && Array.isArray(response.data)) {
+        console.log('Retrieved messages:', response.data);
+        
+        // Enhance messages with sender information
+        const enhancedMessages = response.data.map(message => ({
+          ...message,
+          senderName: message.sender_id === userId ? 'You' : 
+                    selectedConversation.other_participant?.name || 
+                    selectedConversation.other_participant?.email || 'Other User'
+        }));
+        
+        setMessages(enhancedMessages);
+      }
+    } catch (error) {
+      console.error('Error fetching messages:', error);
+      
+      // For development, create some placeholder messages
+      if (process.env.NODE_ENV === 'development') {
+        const now = new Date();
+        const otherUserName = selectedConversation.other_participant?.name || 
+                             selectedConversation.other_participant?.email || 'Other User';
+        
+        const placeholderMessages = [
+          {
+            _id: '1',
+            conversation_id: conversationId,
+            sender_id: selectedConversation.other_participant.id,
+            content: 'Hello, I am interested in your post.',
+            timestamp: new Date(now.getTime() - 3600000).toISOString(), // 1 hour ago
+            senderName: otherUserName
+          },
+          {
+            _id: '2',
+            conversation_id: conversationId,
+            sender_id: userId,
+            content: 'Hi there! Thanks for your interest. Do you have any questions?',
+            timestamp: new Date(now.getTime() - 3000000).toISOString(), // 50 minutes ago
+            senderName: 'You'
+          },
+          {
+            _id: '3',
+            conversation_id: conversationId,
+            sender_id: selectedConversation.other_participant.id,
+            content: 'Yes, is it still available?',
+            timestamp: new Date(now.getTime() - 2400000).toISOString(), // 40 minutes ago
+            senderName: otherUserName
+          },
+          {
+            _id: '4',
+            conversation_id: conversationId,
+            sender_id: userId,
+            content: 'Yes, it is still available.',
+            timestamp: new Date(now.getTime() - 1800000).toISOString(), // 30 minutes ago
+            senderName: 'You'
+          }
+        ];
+        setMessages(placeholderMessages);
+      }
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+  
+  // Handle selecting a conversation
+  const handleSelectConversation = (conversation) => {
+    setSelectedConversation(conversation);
+    fetchMessages(conversation._id);
+  };
+  
+  // Handle file attachment selection
+  const handleAttachmentSelect = (event) => {
+    if (event.target.files && event.target.files.length > 0) {
+      const newAttachments = Array.from(event.target.files).map(file => ({
+        file,
+        preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null,
+        type: file.type.startsWith('image/') ? 'image' : 
+              file.type.startsWith('video/') ? 'video' : 
+              file.type === 'application/pdf' ? 'pdf' : 'file',
+        name: file.name,
+        size: file.size
+      }));
+      
+      setAttachments([...attachments, ...newAttachments]);
+    }
+  };
+  
+  // Handle removing an attachment
+  const handleRemoveAttachment = (index) => {
+    const newAttachments = [...attachments];
+    // Revoke object URL to avoid memory leaks
+    if (newAttachments[index].preview) {
+      URL.revokeObjectURL(newAttachments[index].preview);
+    }
+    newAttachments.splice(index, 1);
+    setAttachments(newAttachments);
+  };
+  
+  // Upload attachment to server
+  const uploadAttachment = async (file) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return null;
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const response = await axios.post('/api/messages/upload', formData, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      if (response.data && response.data.file_url) {
+        return response.data.file_url;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error uploading attachment:', error);
+      // For development, return a mock URL
+      if (process.env.NODE_ENV === 'development') {
+        return `https://example.com/uploads/${file.name}`;
+      }
+      return null;
+    }
+  };
+  
+  // Handle sending a new message
+  const handleSendMessage = async () => {
+    if ((!newMessage.trim() && attachments.length === 0) || !selectedConversation) return;
+    
+    try {
+      setUploadingAttachment(attachments.length > 0);
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      // Upload attachments first if any
+      let attachmentUrls = [];
+      if (attachments.length > 0) {
+        const uploadPromises = attachments.map(attachment => uploadAttachment(attachment.file));
+        attachmentUrls = await Promise.all(uploadPromises);
+        // Filter out any failed uploads
+        attachmentUrls = attachmentUrls.filter(url => url !== null);
+      }
+      
+      const messageData = {
+        conversation_id: selectedConversation._id,
+        content: newMessage,
+        recipient_id: selectedConversation.other_participant.id,
+        attachments: attachmentUrls.map(url => ({
+          url,
+          type: url.match(/\.(jpg|jpeg|png|gif)$/i) ? 'image' : 
+                url.match(/\.(mp4|webm|ogg)$/i) ? 'video' : 
+                url.match(/\.pdf$/i) ? 'pdf' : 'file'
+        }))
+      };
+      
+      const response = await axios.post('/api/messages/send', messageData, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.data) {
+        // Add the new message to the messages list
+        setMessages([...messages, {
+          _id: response.data._id || Date.now().toString(),
+          conversation_id: selectedConversation._id,
+          sender_id: userId,
+          content: newMessage,
+          attachments: messageData.attachments,
+          timestamp: new Date().toISOString()
+        }]);
+        
+        // Update the conversation's last message
+        const lastMessageText = newMessage.trim() || 
+          (attachmentUrls.length > 0 ? `Sent ${attachmentUrls.length} attachment(s)` : 'Sent a message');
+        
+        const updatedConversations = conversations.map(conv => 
+          conv._id === selectedConversation._id 
+            ? { ...conv, last_message: lastMessageText, last_message_time: new Date().toISOString() }
+            : conv
+        );
+        setConversations(updatedConversations);
+        
+        // Clear the input field and attachments
+        setNewMessage('');
+        setAttachments([]);
+      }
+      setUploadingAttachment(false);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setUploadingAttachment(false);
+      
+      // For development, simulate sending a message
+      if (process.env.NODE_ENV === 'development') {
+        const attachmentMocks = attachments.map(attachment => ({
+          url: `https://example.com/uploads/${attachment.name}`,
+          type: attachment.type
+        }));
+        
+        const newMsg = {
+          _id: Date.now().toString(),
+          conversation_id: selectedConversation._id,
+          sender_id: userId,
+          content: newMessage,
+          attachments: attachmentMocks,
+          timestamp: new Date().toISOString()
+        };
+        
+        setMessages([...messages, newMsg]);
+        
+        const lastMessageText = newMessage.trim() || 
+          (attachments.length > 0 ? `Sent ${attachments.length} attachment(s)` : 'Sent a message');
+          
+        const updatedConversations = conversations.map(conv => 
+          conv._id === selectedConversation._id 
+            ? { ...conv, last_message: lastMessageText, last_message_time: new Date().toISOString() }
+            : conv
+        );
+        setConversations(updatedConversations);
+        
+        setNewMessage('');
+        setAttachments([]);
+      }
+    }
+  };
+  
+  // Format timestamp to readable format
+  const formatTimestamp = (timestamp) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + 
+           date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+  
+  return (
+    <Paper sx={{ 
+      height: '70vh', 
+      overflow: 'hidden', 
+      display: 'flex', 
+      borderRadius: 2, 
+      boxShadow: '0 8px 24px rgba(0,0,0,0.12)', 
+      background: 'linear-gradient(to bottom, #ffffff, #f9f9f9)'
+    }}>
+      {/* Left side - Conversations list */}
+      <Box sx={{ 
+        width: '30%', 
+        borderRight: '1px solid rgba(0,0,0,0.08)', 
+        display: 'flex', 
+        flexDirection: 'column',
+        bgcolor: 'rgba(249, 250, 251, 0.8)'
+      }}>
+        <Box sx={{ 
+          p: 2, 
+          borderBottom: '1px solid rgba(0,0,0,0.08)', 
+          bgcolor: '#f5f5f5',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a237e' }}>Messages</Typography>
+          {error && (
+            <Tooltip title="Refresh">
+              <IconButton size="small" onClick={fetchConversations}>
+                <RefreshIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+        
+        <Box sx={{ flexGrow: 1, overflow: 'auto' }}>
+          {loading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', p: 3 }}>
+              <CircularProgress size={28} thickness={4} sx={{ color: '#3f51b5' }} />
+            </Box>
+          ) : error ? (
+            <Box sx={{ p: 3, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+              <Typography color="error" sx={{ mb: 2 }}>{error}</Typography>
+              <Button 
+                variant="outlined" 
+                color="primary" 
+                startIcon={<RefreshIcon />}
+                onClick={fetchConversations}
+                size="small"
+              >
+                Try Again
+              </Button>
+            </Box>
+          ) : conversations.length > 0 ? (
+            <List sx={{ p: 0 }}>
+              {conversations.map((conversation) => {
+                // Get the other participant's name or email
+                const otherParticipantName = conversation.other_participant?.name || 
+                                             conversation.other_participant?.email || 'Unknown User';
+                
+                // Get the first letter for the avatar
+                const avatarLetter = otherParticipantName.charAt(0).toUpperCase();
+                
+                // Format the timestamp
+                const formattedTime = conversation.last_message_time ? 
+                  formatTimestamp(conversation.last_message_time) : '';
+                
+                // Generate a color based on the participant's name (for consistent avatar colors)
+                const stringToColor = (str) => {
+                  let hash = 0;
+                  for (let i = 0; i < str.length; i++) {
+                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                  }
+                  let color = '#';
+                  for (let i = 0; i < 3; i++) {
+                    const value = (hash >> (i * 8)) & 0xFF;
+                    color += ('00' + value.toString(16)).substr(-2);
+                  }
+                  return color;
+                };
+                
+                const avatarColor = stringToColor(otherParticipantName);
+                
+                return (
+                  <ListItem 
+                    key={conversation._id} 
+                    button 
+                    selected={selectedConversation?._id === conversation._id}
+                    onClick={() => handleSelectConversation(conversation)}
+                    sx={{ 
+                      borderBottom: '1px solid rgba(0,0,0,0.05)',
+                      transition: 'all 0.2s ease',
+                      '&:hover': { bgcolor: 'rgba(0,0,0,0.03)' },
+                      bgcolor: selectedConversation?._id === conversation._id ? 'rgba(63, 81, 181, 0.08)' : 'inherit',
+                      py: 1.5
+                    }}
+                  >
+                    <ListItemAvatar>
+                      <Avatar 
+                        src={conversation.other_participant?.profile_picture || ''}
+                        sx={{ 
+                          bgcolor: avatarColor,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                        }}
+                      >
+                        {avatarLetter}
+                      </Avatar>
+                    </ListItemAvatar>
+                    <ListItemText 
+                      primary={
+                        <Typography 
+                          variant="subtitle1" 
+                          sx={{ 
+                            fontWeight: conversation.unread_count > 0 ? 600 : 400,
+                            color: conversation.unread_count > 0 ? '#1a237e' : 'inherit',
+                            fontSize: '0.95rem'
+                          }}
+                        >
+                          {otherParticipantName}
+                        </Typography>
+                      }
+                      secondary={
+                        <Box sx={{ display: 'flex', flexDirection: 'column', mt: 0.5 }}>
+                          <Typography 
+                            variant="body2" 
+                            noWrap 
+                            sx={{ 
+                              display: 'inline-block', 
+                              maxWidth: '180px', 
+                              textOverflow: 'ellipsis',
+                              fontWeight: conversation.unread_count > 0 ? 500 : 400,
+                              color: conversation.unread_count > 0 ? 'text.primary' : 'text.secondary',
+                              fontSize: '0.85rem'
+                            }}
+                          >
+                            {conversation.last_message || 'No messages yet'}
+                          </Typography>
+                          <Typography 
+                            variant="caption" 
+                            color="text.secondary"
+                            sx={{ mt: 0.5, fontSize: '0.75rem' }}
+                          >
+                            {formattedTime}
+                          </Typography>
+                        </Box>
+                      }
+                    />
+                    {conversation.unread_count > 0 && (
+                      <Box
+                        sx={{
+                          bgcolor: '#3f51b5',
+                          color: 'white',
+                          borderRadius: '50%',
+                          minWidth: 22,
+                          height: 22,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.75rem',
+                          fontWeight: 'bold',
+                          ml: 1,
+                          px: 1,
+                          boxShadow: '0 2px 5px rgba(0,0,0,0.2)'
+                        }}
+                      >
+                        {conversation.unread_count}
+                      </Box>
+                    )}
+                  </ListItem>
+                );
+              })}
+            </List>
+          ) : (
+            <Box sx={{ 
+              p: 3, 
+              textAlign: 'center', 
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              height: '100%' 
+            }}>
+              <ChatBubbleOutlineIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
+              <Typography color="text.secondary" sx={{ mb: 1 }}>No messages yet</Typography>
+              <Typography variant="caption" color="text.disabled" sx={{ mb: 2, px: 4 }}>
+                Messages from your marketplace, ride share, and lost & found interactions will appear here
+              </Typography>
+            </Box>
+          )}
+        </Box>
+      </Box>
+      
+      {/* Right side - Messages */}
+      <Box sx={{ width: '70%', display: 'flex', flexDirection: 'column' }}>
+        {selectedConversation ? (
+          <>
+            {/* Conversation header */}
+            <Box sx={{ 
+              p: 2, 
+              borderBottom: '1px solid rgba(0,0,0,0.08)', 
+              bgcolor: 'rgba(249, 250, 251, 0.8)', 
+              display: 'flex', 
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Avatar 
+                  src={selectedConversation.other_participant?.profile_picture || ''}
+                  sx={{ 
+                    mr: 2, 
+                    bgcolor: '#3f51b5',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    width: 40,
+                    height: 40
+                  }}
+                >
+                  {selectedConversation.other_participant?.name?.charAt(0).toUpperCase() || 
+                  selectedConversation.other_participant?.email?.charAt(0).toUpperCase() || 'U'}
+                </Avatar>
+                <Box>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#1a237e', fontSize: '1.1rem' }}>
+                    {selectedConversation.other_participant?.name || 
+                    selectedConversation.other_participant?.email || 'Unknown User'}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {selectedConversation.other_participant?.email || ''}
+                  </Typography>
+                </Box>
+              </Box>
+              <Tooltip title="Refresh messages">
+                <IconButton size="small" onClick={() => fetchMessages(selectedConversation._id)}>
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Box>
+            
+            {/* Messages area */}
+            <Box sx={{ 
+              flexGrow: 1, 
+              overflow: 'auto', 
+              p: 3, 
+              display: 'flex', 
+              flexDirection: 'column',
+              bgcolor: 'rgba(250, 250, 252, 0.5)'
+            }}>
+              {loadingMessages ? (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                  <CircularProgress size={28} thickness={4} sx={{ color: '#3f51b5' }} />
+                </Box>
+              ) : messages.length > 0 ? (
+                messages.map((message, index) => {
+                  const isFromMe = message.sender_id === userId;
+                  const prevMessage = index > 0 ? messages[index - 1] : null;
+                  const showAvatar = !isFromMe && (!prevMessage || prevMessage.sender_id !== message.sender_id);
+                  const showTimestamp = !messages[index + 1] || 
+                                      new Date(message.timestamp).getDate() !== new Date(messages[index + 1].timestamp).getDate();
+                  
+                  return (
+                    <Box
+                      key={message._id}
+                      sx={{
+                        display: 'flex',
+                        justifyContent: isFromMe ? 'flex-end' : 'flex-start',
+                        mb: 1.5,
+                        position: 'relative'
+                      }}
+                    >
+                      {showAvatar ? (
+                        <Avatar
+                          src={selectedConversation.other_participant?.profile_picture || ''}
+                          sx={{ 
+                            mr: 1, 
+                            width: 32, 
+                            height: 32, 
+                            bgcolor: '#3f51b5',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                          }}
+                        >
+                          {selectedConversation.other_participant?.name?.charAt(0).toUpperCase() || 
+                          selectedConversation.other_participant?.email?.charAt(0).toUpperCase() || 'U'}
+                        </Avatar>
+                      ) : !isFromMe ? (
+                        <Box sx={{ width: 32, mr: 1 }} />
+                      ) : null}
+                      <Box
+                        sx={{
+                          maxWidth: '70%',
+                          p: 1.5,
+                          borderRadius: isFromMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                          bgcolor: isFromMe ? 'linear-gradient(135deg, #3f51b5, #5c6bc0)' : '#f5f5f5',
+                          background: isFromMe ? 'linear-gradient(135deg, #3f51b5, #5c6bc0)' : '#f5f5f5',
+                          color: isFromMe ? 'white' : 'text.primary',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                          position: 'relative'
+                        }}
+                      >
+                        <Typography variant="body1" sx={{ wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                          {message.content}
+                        </Typography>
+                        <Typography 
+                                  {attachment.type === 'pdf' && (
+                                    <Button 
+                                      variant="outlined" 
+                                      size="small"
+                                      startIcon={<SaveIcon />}
+                                      onClick={() => window.open(attachment.url, '_blank')}
+                                    >
+                                      View PDF
+                                    </Button>
+                                  )}
+                                  {attachment.type === 'file' && (
+                                    <Button 
+                                      variant="outlined" 
+                                      size="small"
+                                      startIcon={<SaveIcon />}
+                                      onClick={() => window.open(attachment.url, '_blank')}
+                                    >
+                                      Download File
+                                    </Button>
+                                  )}
+                                </Box>
+                              ))}
+                            </Box>
+                          )}
+                        </Paper>
+                        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                          {formatTimestamp(message.timestamp)}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                })
+              ) : (
+                <Box sx={{ p: 3, textAlign: 'center' }}>
+                  <Typography color="text.secondary">No messages yet</Typography>
+                </Box>
+              )}
+              <div ref={messagesEndRef} />
+            </Box>
+            
+            {/* Attachments preview */}
+            {attachments.length > 0 && (
+              <Box sx={{ p: 2, borderTop: '1px solid #e0e0e0', display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {attachments.map((attachment, index) => (
+                  <Box 
+                    key={index} 
+                    sx={{ 
+                      position: 'relative',
+                      width: 80, 
+                      height: 80, 
+                      border: '1px solid #e0e0e0',
+                      borderRadius: 1,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    {attachment.type === 'image' && (
+                      <img 
+                        src={attachment.preview} 
+                        alt={attachment.name} 
+                        style={{ maxWidth: '100%', maxHeight: '100%' }} 
+                      />
+                    )}
+                    {attachment.type === 'video' && (
+                      <Box sx={{ bgcolor: '#f5f5f5', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography variant="caption" sx={{ p: 1, textAlign: 'center' }}>
+                          Video: {attachment.name}
+                        </Typography>
+                      </Box>
+                    )}
+                    {attachment.type === 'pdf' && (
+                      <Box sx={{ bgcolor: '#f5f5f5', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography variant="caption" sx={{ p: 1, textAlign: 'center' }}>
+                          PDF: {attachment.name}
+                        </Typography>
+                      </Box>
+                    )}
+                    {attachment.type === 'file' && (
+                      <Box sx={{ bgcolor: '#f5f5f5', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Typography variant="caption" sx={{ p: 1, textAlign: 'center' }}>
+                          File: {attachment.name}
+                        </Typography>
+                      </Box>
+                    )}
+                    <IconButton 
+                      size="small" 
+                      sx={{ position: 'absolute', top: 0, right: 0, bgcolor: 'rgba(255,255,255,0.7)' }}
+                      onClick={() => handleRemoveAttachment(index)}
+                    >
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Box>
+                ))}
+              </Box>
+            )}
+            
+            {/* Message input */}
+            <Box sx={{ p: 2, borderTop: '1px solid #e0e0e0', display: 'flex', alignItems: 'center' }}>
+              <TextField
+                fullWidth
+                variant="outlined"
+                placeholder="Type a message..."
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
+                size="small"
+                sx={{ mr: 1 }}
+                multiline
+                maxRows={3}
+              />
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/*,application/pdf"
+                style={{ display: 'none' }}
+                ref={fileInputRef}
+                onChange={handleAttachmentSelect}
+              />
+              <IconButton 
+                color="primary" 
+                onClick={() => fileInputRef.current?.click()}
+                sx={{ mr: 1 }}
+              >
+                <PhotoCameraIcon />
+              </IconButton>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={handleSendMessage}
+                disabled={(newMessage.trim() === '' && attachments.length === 0) || uploadingAttachment}
+              >
+                {uploadingAttachment ? <CircularProgress size={24} color="inherit" /> : 'SEND'}
+              </Button>
+            </Box>
+          </>
+        ) : (
+          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+            <Box sx={{ textAlign: 'center', p: 3 }}>
+              <ChatIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+              <Typography variant="h6">Select a conversation</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Choose a conversation from the list to start messaging
+              </Typography>
+            </Box>
+          </Box>
+        )}
+      </Box>
+    </Paper>
+  );
+};
+
+// Utility function for getting item image
+const getItemImage = (item) => {
+  if (!item) return '';
+  if (item.images && item.images.length > 0) {
+    const firstImage = item.images[0];
+    return firstImage.startsWith('http') ? firstImage : `http://localhost:5000${firstImage}`;
+  }
+  if (item.image) {
+    return item.image.startsWith('http') ? item.image : `http://localhost:5000${item.image}`;
+  }
+  return '';
+};
+
+const UserProfile = () => {
+  const navigate = useNavigate();
+  const params = useParams();
+  // Debounce state for actions
+  const [actionDebounce, setActionDebounce] = useState(false);
+
+  // View item details (best practice: open details drawer)
+  const handleViewItem = (item) => {
+    if (actionDebounce) return;
+    setActionDebounce(true);
+    setTimeout(() => setActionDebounce(false), 800); // 800ms debounce
+    setSelectedItem(item);
+    setItemDetailsOpen(true);
+  };
+
+  // Edit item (best practice: open edit dialog with item)
+  const handleEditItem = (item) => {
+    if (actionDebounce) return;
+    setActionDebounce(true);
+    setTimeout(() => setActionDebounce(false), 800);
+    setSelectedItemForEdit(item);
+    setEditItemOpen(true);
+  };
+
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingPosts, setLoadingPosts] = useState(true);
+  const [profileImage, setProfileImage] = useState(null);
+  const [idCardImage, setIdCardImage] = useState(null);
+  const [marketplacePosts, setMarketplacePosts] = useState([]);
+  const [lostFoundItems, setLostFoundItems] = useState([]);
+  const [rideRequests, setRideRequests] = useState([]);
+  const [tabValue, setTabValue] = useState(0);
+  const [messageCount, setMessageCount] = useState(0);
+  const [conversations, setConversations] = useState([]);
+  const [editMode, setEditMode] = useState(false);
+  const [updatedUser, setUpdatedUser] = useState({});
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingIdCard, setUploadingIdCard] = useState(false);
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, postId: null, postType: null });
+  const [selectedItem, setSelectedItem] = useState(null);
+  const [itemDetailsOpen, setItemDetailsOpen] = useState(false);
+  const [editItemOpen, setEditItemOpen] = useState(false);
+  const [selectedItemForEdit, setSelectedItemForEdit] = useState(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deletingItem, setDeletingItem] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [newItemOpen, setNewItemOpen] = useState(false);
+  const [purchaseHistory, setPurchaseHistory] = useState([]);
+  const [sellingHistory, setSellingHistory] = useState([]);
+  const [loadingPurchaseHistory, setLoadingPurchaseHistory] = useState(false);
+  const [loadingSellingHistory, setLoadingSellingHistory] = useState(false);
+
+  useEffect(() => {
+    document.body.classList.add('user-profile-page');
+    return () => {
+      document.body.classList.remove('user-profile-page');
+    };
+  }, []);
+
+  // Check for unread messages
+  useEffect(() => {
+    const checkUnreadMessages = async () => {
+      if (!user?.id && !user?._id) return;
+      
+      try {
+        const token = localStorage.getItem('token');
+        const userId = user?.id || user?._id;
+        
+        // Use the correct messages endpoint based on backend route registration with relative path
+        const response = await axios.get(`/api/messages/unread`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        setMessageCount(response.data.count || 0);
+      } catch (error) {
+        console.error('Error fetching unread messages:', error);
+        // Don't show error to user, just set count to 0
+        setMessageCount(0);
+      }
+    };
+    
+    checkUnreadMessages();
+    // Set up polling for new messages every minute
+    const intervalId = setInterval(checkUnreadMessages, 60000);
+    
+    return () => clearInterval(intervalId);
+  }, [user?.id, user?._id]);
+
+  // Function to fetch unread message count
+  const fetchUnreadMessageCount = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      const response = await axios.get('/api/messages/unread/count', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.data && typeof response.data.count === 'number') {
+        setMessageCount(response.data.count);
+      }
+    } catch (error) {
+      console.error('Error fetching unread message count:', error);
+      // Set a placeholder count for development
+      if (process.env.NODE_ENV === 'development') {
+        setMessageCount(2); // Show a badge with 2 unread messages for testing
+      }
+    }
+  };
+
+  // Load user data from localStorage and fetch additional details from API
+  useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem('token');
+      const userData = localStorage.getItem('user');
+      
+      if (!token) {
+        navigate('/login');
+        return;
+      }
+      
+      try {
+        // First try to decode the token directly to get user ID
+        const decodedToken = decodeJwtToken(token);
+        let userId = null;
+        
+        if (decodedToken) {
+          // Extract user ID from token
+          userId = decodedToken.sub || decodedToken.user_id || decodedToken.id;
+          console.log('Extracted user ID from token:', userId);
+        }
+        
+        // If we have userData in localStorage, try to parse it
+        if (userData) {
+          try {
+            const parsedUser = JSON.parse(userData);
+            // Use localStorage user data as initial state
+            setUser(parsedUser);
+            setUpdatedUser(parsedUser);
+            
+            // If we didn't get userId from token, try from localStorage
+            if (!userId) {
+              userId = parsedUser.id || parsedUser._id;
+            }
+          } catch (parseError) {
+            console.error('Error parsing user data from localStorage:', parseError);
+          }
+        }
+        
+        // Set default headers for future requests
+        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        
+        // Fetch complete user details to update our user state
+        await fetchUserDetails();
+        
+        // At this point, we should have user data either from token, localStorage, or API
+        // Get the current user ID from our state
+        const currentUserId = userId || 
+                             (user && (user.id || user._id)) || 
+                             (decodedToken && (decodedToken.sub || decodedToken.user_id || decodedToken.id));
+        
+        if (currentUserId) {
+          console.log('Using user ID for API calls:', currentUserId);
+          // Fetch user activity from all sections
+          fetchMarketplacePosts(currentUserId);
+          fetchLostFoundItems(currentUserId);
+          // Ride-related code removed as requested
+          fetchPurchaseHistory(currentUserId);
+          fetchSellingHistory(currentUserId);
+        } else {
+          console.error('Could not determine user ID for API calls');
+          // Try to fetch general data without user ID filtering
+          fetchMarketplacePosts(null);
+          fetchLostFoundItems(null);
+          fetchPurchaseHistory(null);
+          fetchSellingHistory(null);
+        }
+      } catch (err) {
+        console.error('Error in authentication process:', err);
+        // Try to continue with token-based authentication only
+        try {
+          await fetchUserDetails();
+          // Use whatever user ID we can get at this point
+          const fallbackUserId = user && (user.id || user._id);
+          if (fallbackUserId) {
+            fetchMarketplacePosts(fallbackUserId);
+            fetchLostFoundItems(fallbackUserId);
+            fetchPurchaseHistory(fallbackUserId);
+            fetchSellingHistory(fallbackUserId);
+          }
+        } catch (finalError) {
+          console.error('All authentication methods failed:', finalError);
+          navigate('/login');
+        }
+      }
+    };
+    
+    checkAuth();
+  }, [navigate]);
+
+  // Function to decode JWT token
+  const decodeJwtToken = (token) => {
+    try {
+      // JWT tokens are made up of three parts: header.payload.signature
+      // We only need the payload part which is the second part
+      const base64Url = token.split('.')[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const decoded = JSON.parse(jsonPayload);
+      console.log('Decoded JWT token payload:', decoded);
+      return decoded;
+    } catch (error) {
+      console.error('Error decoding JWT token:', error);
+      return null;
+    }
+  };
+  
+  // Helper function to get user display name
+  const getUserDisplayName = () => {
+    console.log('Current user data for display:', user); // Debug user data
+    
+    // Check for name in different possible locations
+    if (user?.name && user.name !== 'undefined' && user.name !== 'null') return user.name;
+    if (user?.username && user.username !== 'undefined' && user.username !== 'null') return user.username;
+    if (user?.fullName && user.fullName !== 'undefined' && user.fullName !== 'null') return user.fullName;
+    if (user?.full_name && user.full_name !== 'undefined' && user.full_name !== 'null') return user.full_name;
+    
+    // If email is available, use that
+    if (user?.email && user.email !== 'undefined' && user.email !== 'null') return user.email;
+    
+    // If we have localStorage data, try to use that for name or email
+    try {
+      const userData = localStorage.getItem('user');
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        if (parsedUser.name && parsedUser.name !== 'undefined' && parsedUser.name !== 'null') return parsedUser.name;
+        if (parsedUser.username && parsedUser.username !== 'undefined' && parsedUser.username !== 'null') return parsedUser.username;
+        if (parsedUser.email && parsedUser.email !== 'undefined' && parsedUser.email !== 'null') return parsedUser.email;
+      }
+      
+      // Try to get email from localStorage directly
+      const userEmail = localStorage.getItem('userEmail');
+      if (userEmail && userEmail !== 'undefined' && userEmail !== 'null') return userEmail;
+    } catch (error) {
+      console.error('Error fetching user display name:', error);
+    }
+    
+    // If no name or email is found, return generic User
+    return 'User';
+  };
+
+  // Function to fetch user details
+  const fetchUserDetails = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token available for authentication');
+        setLoading(false);
+        return;
+      }
+      
+      const decodedToken = decodeJwtToken(token);
+      console.log('Decoded token:', decodedToken);
+      
+      // Try to get user ID from token or params
+      let userId = decodedToken?.user_id || decodedToken?.sub || params?.id;
+      if (!userId && decodedToken?.id) {
+        userId = decodedToken.id;
+      }
+      
+      console.log('Using user ID:', userId);
+      
+      // Store any email we find in localStorage for future use
+      if (decodedToken?.email) {
+        localStorage.setItem('userEmail', decodedToken.email);
+      }
+      
+      if (userId) {
+          // Try multiple endpoints to get user data
+          const endpoints = [
+            '/api/users/me',
+            '/api/auth/me',
+            `/api/users/${userId}`,
+            `/api/users/profile/${userId}`
+          ];
+          
+          let userData = null;
+          
+          for (const endpoint of endpoints) {
+            try {
+              console.log(`Trying to fetch user data from ${endpoint}`);
+              const response = await axios.get(endpoint, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              
+              if (response.data) {
+                console.log(`User data from ${endpoint}:`, response.data);
+                userData = response.data;
+                
+                // If we found email, store it
+                if (response.data.email) {
+                  localStorage.setItem('userEmail', response.data.email);
+                  break; // We found what we needed, stop trying endpoints
+                }
+              }
+            } catch (endpointError) {
+              console.error(`Error fetching from ${endpoint}:`, endpointError);
+              // Continue to next endpoint
+            }
+          }
+          
+          if (userData) {
+            // We found some user data
+            setUser(userData);
+            setUpdatedUser(userData);
+            
+            if (userData.profile_picture) {
+              setProfileImage(userData.profile_picture);
+            }
+            
+            if (userData.id_card_image) {
+              setIdCardImage(userData.id_card_image);
+            } else if (userData.id_card_photo) {
+              setIdCardImage(userData.id_card_photo);
+            }
+            
+            // Fetch user's activity data
+            fetchMarketplacePosts(userId);
+            fetchLostFoundItems(userId);
+            fetchPurchaseHistory(userId);
+            fetchSellingHistory(userId);
+          } else {
+            // Try localStorage as last resort
+            const localUserData = localStorage.getItem('user');
+            if (localUserData) {
+              try {
+                const parsedUser = JSON.parse(localUserData);
+                console.log('Using localStorage user data as fallback:', parsedUser);
+                setUser(parsedUser);
+                setUpdatedUser(parsedUser);
+                
+                // Fetch user's activity data
+                fetchMarketplacePosts(parsedUser.id || parsedUser._id);
+                fetchLostFoundItems(parsedUser.id || parsedUser._id);
+                fetchPurchaseHistory(parsedUser.id || parsedUser._id);
+                fetchSellingHistory(parsedUser.id || parsedUser._id);
+              } catch (parseError) {
+                console.error('Error parsing user data from localStorage:', parseError);
+              }
+            } else if (decodedToken) {
+              // Use token data if nothing else is available
+              const tokenUser = {
+                id: userId,
+                name: decodedToken.name,
+                email: decodedToken.email
+              };
+              console.log('Using token data as fallback:', tokenUser);
+              setUser(tokenUser);
+              setUpdatedUser(tokenUser);
+              
+              // Fetch user's activity data
+              fetchMarketplacePosts(userId);
+              fetchLostFoundItems(userId);
+              fetchPurchaseHistory(userId);
+              fetchSellingHistory(userId);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching user details:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+  // Function to fetch marketplace posts
+  const fetchMarketplacePosts = async (userId) => {
+    setLoadingPosts(true);
+    try {
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        console.error('No token available for authentication');
+        setMarketplacePosts([]);
+        setLoadingPosts(false);
+        return;
+      }
+      
+      // If we have a userId, try the user-specific endpoint first
+      if (userId) {
+        try {
+          const response = await axios.get(`/api/marketplace/items/user/${userId}?_=${timestamp}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (response.data && Array.isArray(response.data)) {
+            setMarketplacePosts(response.data);
+            setLoadingPosts(false);
+            return;
+          }
+        } catch (error) {
+          console.log('User-specific marketplace endpoint failed, trying general endpoint...');
+          // Continue to fallback
+        }
+      }
+      
+      // Fallback: try to get all marketplace items
+      try {
+        const allItemsResponse = await axios.get(`/api/marketplace/items?_=${timestamp}`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        if (allItemsResponse.data && Array.isArray(allItemsResponse.data)) {
+          // If we have a userId, filter the items
+          if (userId) {
+            const userItems = allItemsResponse.data.filter(item => {
+              // Check all possible ID fields
+              return (
+                (item.user_id && (item.user_id.toString() === userId.toString())) || 
+                (item.seller_id && (item.seller_id.toString() === userId.toString())) || 
+                (item.created_by && (item.created_by.toString() === userId.toString()))
+              );
+            });
+            setMarketplacePosts(userItems);
+          } else {
+            // If no userId, just show all items
+            setMarketplacePosts(allItemsResponse.data);
+          }
+        } else {
+          setMarketplacePosts([]);
+        }
+      } catch (finalError) {
+        console.error('All marketplace endpoints failed:', finalError);
+        setMarketplacePosts([]);
+      }
+      
+      setLoadingPosts(false);
+    } catch (err) {
+      console.error('Error fetching marketplace posts:', err);
+      setMarketplacePosts([]);
+      setLoadingPosts(false);
+    }
+  };
+  
+  // Function to fetch lost & found items
+  const fetchLostFoundItems = async (userId) => {
+    try {
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const token = localStorage.getItem('token');
+      
+      if (!token) {
+        console.error('No token available for authentication');
+        setLostFoundItems([]);
+        return;
+      }
+      
+      // If we have a userId, try the user-specific endpoint first
+      if (userId) {
+        try {
+          const response = await axios.get(`/api/lost-found/user-items/${userId}?_=${timestamp}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+          
+          if (response.data && Array.isArray(response.data)) {
+            setLostFoundItems(response.data);
+            return;
+          }
+        } catch (error) {
+          console.log('User-specific lost & found endpoint failed, trying general endpoint...');
+          // Continue to fallback
+        }
+      }
+      
+      // Fallback: try to get all lost & found items
+      try {
+        // Try different endpoint variations
+        let allItemsResponse;
+        try {
+          allItemsResponse = await axios.get(`/api/lost-found/items?_=${timestamp}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        } catch (error) {
+          // Try alternative endpoint
+          allItemsResponse = await axios.get(`/api/lost-found?_=${timestamp}`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        }
+        
+        if (allItemsResponse.data && Array.isArray(allItemsResponse.data)) {
+          // If we have a userId, filter the items
+          if (userId) {
+            const userItems = allItemsResponse.data.filter(item => {
+              // Check all possible ID fields
+              return (
+                (item.user_id && (item.user_id.toString() === userId.toString())) || 
+                (item.reporter_id && (item.reporter_id.toString() === userId.toString())) || 
+                (item.created_by && (item.created_by.toString() === userId.toString()))
+              );
+            });
+            setLostFoundItems(userItems);
+          } else {
+            // If no userId, just show all items
+            setLostFoundItems(allItemsResponse.data);
+          }
+        } else {
+          setLostFoundItems([]);
+        }
+      } catch (finalError) {
+        console.error('All lost & found endpoints failed:', finalError);
+        setLostFoundItems([]);
+      }
+    } catch (err) {
+      console.error('Error fetching lost & found items:', err);
+      setLostFoundItems([]);
+    } finally {
+      setLoadingPosts(false);
+    }
+  };
+  
+  // Function to fetch purchase history
+  const fetchPurchaseHistory = async (userId) => {
+    setLoadingPurchaseHistory(true);
+    try {
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/marketplace/orders/buyer?_=${timestamp}`);
+      setPurchaseHistory(response.data || []);
+    } catch (err) {
+      console.error('Error fetching purchase history:', err);
+    } finally {
+      setLoadingPurchaseHistory(false);
+    }
+  };
+
+  const fetchSellingHistory = async (userId) => {
+    setLoadingSellingHistory(true);
+    try {
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const response = await axios.get(`/api/marketplace/orders/seller?_=${timestamp}`);
+      setSellingHistory(response.data || []);
+    } catch (err) {
+      console.error('Error fetching selling history:', err);
+    } finally {
+      setLoadingSellingHistory(false);
+    }
+  };
+
+  const handleProfileImageChange = (event) => {
+    if (event.target.files && event.target.files[0]) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        setProfileImage(e.target.result);
+      };
+      
+      reader.readAsDataURL(file);
+      uploadProfileImage(file);
+    }
+  };
+
+  const uploadProfileImage = async (file) => {
+    setUploadingImage(true);
+    try {
+      const formData = new FormData();
+      formData.append('profile_picture', file);
+      
+      const response = await axios.post(`/api/users/${user.id}/profile-picture`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      if (response.data.profile_picture) {
+        setProfileImage(response.data.profile_picture);
+        
+        // Update local storage user data
+        const userData = JSON.parse(localStorage.getItem('user'));
+        userData.profile_picture = response.data.profile_picture;
+        localStorage.setItem('user', JSON.stringify(userData));
+        
+        setSnackbar({
+          open: true,
+          message: 'Profile picture updated successfully',
+          severity: 'success'
+        });
+      }
+    } catch (err) {
+      console.error('Error uploading profile picture:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to upload profile picture',
+        severity: 'error'
+      });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleIdCardImageChange = (event) => {
+    if (event.target.files && event.target.files[0]) {
+      const file = event.target.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = (e) => {
+        setIdCardImage(e.target.result);
+      };
+      
+      reader.readAsDataURL(file);
+      uploadIdCardImage(file);
+    }
+  };
+
+  const uploadIdCardImage = async (file) => {
+    setUploadingIdCard(true);
+    try {
+      const formData = new FormData();
+      formData.append('id_card_image', file);
+      
+      const response = await axios.post(`/api/users/${user.id}/id-card-image`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+      
+      if (response.data.id_card_image) {
+        setIdCardImage(response.data.id_card_image);
+        
+        // Update local storage user data
+        const userData = JSON.parse(localStorage.getItem('user'));
+        userData.id_card_image = response.data.id_card_image;
+        localStorage.setItem('user', JSON.stringify(userData));
+        
+        setSnackbar({
+          open: true,
+          message: 'ID card image uploaded successfully',
+          severity: 'success'
+        });
+      }
+    } catch (err) {
+      console.error('Error uploading ID card image:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to upload ID card image',
+        severity: 'error'
+      });
+    } finally {
+      setUploadingIdCard(false);
+    }
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+  };
+
+  const handleEditClick = () => {
+    setEditMode(true);
+  };
+
+  const handleCancelEdit = () => {
+    setEditMode(false);
+    setUpdatedUser(user);
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setUpdatedUser(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSaveChanges = async () => {
+    try {
+      const response = await axios.put(`/api/users/${user.id}`, updatedUser);
+      
+      // Update local state and localStorage
+      setUser(response.data);
+      localStorage.setItem('user', JSON.stringify(response.data));
+      
+      setEditMode(false);
+      setSnackbar({
+        open: true,
+        message: 'Profile updated successfully',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error('Error updating profile:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to update profile',
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/');
+    
+    setSnackbar({
+      open: true,
+      message: 'Logged out successfully',
+      severity: 'success'
+    });
+  };
+
+  // Fallback method to fetch conversations when the main API call fails
+  const fetchConversationsFallback = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      
+      // Try alternative endpoint
+      const response = await axios.get('/api/messages/conversations', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (response.data && Array.isArray(response.data)) {
+        console.log('Fallback method retrieved conversations:', response.data);
+        setConversations(response.data);
+      }
+    } catch (error) {
+      console.error('Fallback method also failed:', error);
+      // As a last resort, create some placeholder conversations for testing
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Creating placeholder conversations for development');
+        const placeholderConversations = [
+          {
+            _id: '1',
+            participant1_id: user?.id || user?._id,
+            participant2_id: 'user123',
+            last_message: 'Hello, is this item still available?',
+            last_message_time: new Date().toISOString(),
+            other_participant: {
+              id: 'user123',
+              name: 'John Doe',
+              email: 'john@example.com'
+            }
+          },
+          {
+            _id: '2',
+            participant1_id: 'user456',
+            participant2_id: user?.id || user?._id,
+            last_message: 'I am interested in your lost item post',
+            last_message_time: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+            other_participant: {
+              id: 'user456',
+              name: 'Jane Smith',
+              email: 'jane@example.com'
+            }
+          }
+        ];
+        setConversations(placeholderConversations);
+      }
+    }
+  };
+
+  const handleDeleteProfilePicture = async () => {
+    try {
+      setUploadingImage(true);
+      const response = await axios.delete(`/api/users/${user?._id || user?.id}/profile-picture`);
+      
+      if (response.data) {
+        setProfileImage(null);
+        
+        // Update local storage user data
+        const userData = JSON.parse(localStorage.getItem('user'));
+        if (userData && userData.profile_picture) {
+          delete userData.profile_picture;
+          localStorage.setItem('user', JSON.stringify(userData));
+        }
+        
+        setSnackbar({
+          open: true,
+          message: 'Profile picture deleted successfully',
+          severity: 'success'
+        });
+      }
+    } catch (err) {
+      console.error('Error deleting profile picture:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to delete profile picture',
+        severity: 'error'
+      });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // Load user posts based on active tab
+  useEffect(() => {
+    if (user?._id) {
+      setLoadingPosts(true);
+      
+      // Add timestamp to prevent caching
+      const timestamp = new Date().getTime();
+      const endpoint = 
+        tabValue === 0 ? `/api/marketplace/items/user/${user._id}?_=${timestamp}` : 
+        tabValue === 1 ? `/api/lost-found/user-items/${user._id}?_=${timestamp}` : 
+        tabValue === 2 ? `/api/marketplace/orders/buyer?_=${timestamp}` : 
+        tabValue === 3 ? `/api/marketplace/orders/seller?_=${timestamp}` : 
+        `/api/messages/conversations`;  // Updated to match backend route registration
+      
+      axios.get(endpoint, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      })
+        .then(response => {
+          if (tabValue === 0) {
+            setMarketplacePosts(response.data || []);
+          } else if (tabValue === 1) {
+            setLostFoundItems(response.data || []);
+          } else if (tabValue === 2) {
+            setPurchaseHistory(response.data || []);
+          } else if (tabValue === 3) {
+            setSellingHistory(response.data || []);
+          } else {
+            // Messages tab - handle conversations
+            console.log('Received conversations data:', response.data);
+            if (response.data && Array.isArray(response.data)) {
+              setConversations(response.data);
+            }
+          }
+        })
+        .catch(error => {
+          console.error(`Error fetching user ${tabValue === 0 ? 'marketplace items' : tabValue === 1 ? 'lost & found items' : tabValue === 2 ? 'purchases' : tabValue === 3 ? 'sales' : 'messages'}:`, error);
+          // Don't show the error message to the user, just reset the data to empty array
+          if (tabValue === 0) {
+            setMarketplacePosts([]);
+          } else if (tabValue === 1) {
+            setLostFoundItems([]);
+          } else if (tabValue === 2) {
+            setPurchaseHistory([]);
+          } else if (tabValue === 3) {
+            setSellingHistory([]);
+          } else {
+            // Messages tab error handling
+            console.error('Error fetching conversations, trying fallback method');
+            setConversations([]);
+            // Try fallback method to get conversations
+            fetchConversationsFallback();
+          }
+        })
+        .finally(() => {
+          setLoadingPosts(false);
+        });
+    }
+  }, [user, tabValue]);
+
+  // Handle delete dialog actions
+  const handleOpenDeleteDialog = (id, type) => {
+    setDeleteDialog({
+      open: true,
+      postId: id,
+      postType: type
+    });
+  };
+
+  const handleCloseDeleteDialog = () => {
+    setDeleteDialog({
+      open: false,
+      postId: null,
+      postType: null
+    });
+  };
+
+  const handleDeleteItem = () => {
+    if (!deleteDialog.postId || !deleteDialog.postType) return;
+    
+    const endpoint = 
+      deleteDialog.postType === 'marketplace' ? `/api/marketplace/items/${deleteDialog.postId}` : 
+      `/api/lost-found/items/${deleteDialog.postId}`;
+    
+    axios.delete(endpoint, {
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+    })
+      .then(() => {
+        // Remove deleted item from state
+        if (deleteDialog.postType === 'marketplace') {
+          setMarketplacePosts(prev => prev.filter(item => item._id !== deleteDialog.postId));
+          
+          // Refresh the marketplace data to keep it in sync with other views
+          const userId = user?._id;
+          if (userId) {
+            // Add timestamp to prevent caching
+            const timestamp = new Date().getTime();
+            axios.get(`/api/marketplace/items/user/${userId}?_=${timestamp}`, {
+              headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+            });
+          }
+        } else if (deleteDialog.postType === 'lostfound') {
+          setLostFoundItems(prev => prev.filter(item => item._id !== deleteDialog.postId));
+        } else {
+          setRideRequests(prev => prev.filter(ride => ride._id !== deleteDialog.postId));
+        }
+        
+        setSnackbar({
+          open: true,
+          message: `${deleteDialog.postType === 'marketplace' ? 'Item' : deleteDialog.postType === 'lostfound' ? 'Report' : 'Ride'} deleted successfully.`,
+          severity: 'success'
+        });
+      })
+      .catch(error => {
+        console.error('Error deleting item:', error);
+        setSnackbar({
+          open: true,
+          message: `Failed to delete ${deleteDialog.postType === 'marketplace' ? 'item' : deleteDialog.postType === 'lostfound' ? 'report' : 'ride'}.`,
+          severity: 'error'
+        });
+      })
+      .finally(() => {
+        handleCloseDeleteDialog();
+      });
+  };
+
+  const handleCreateNewItem = () => {
+    setNewItemOpen(true);
+  };
+
+  const handleNewItemSuccess = (newItemData) => {
+    // Handle different response data structures
+    const newItem = newItemData.item || newItemData;
+    
+    // Add the new item to the marketplacePosts at the beginning of the array if it's valid
+    if (newItem && (newItem._id || newItem.item_id)) {
+      // If we need to refresh to get the complete item data
+      if (!newItem.title && newItem.item_id) {
+        // If only an ID is returned, refresh the list to get the complete item
+        handleRefreshMarketplaceItems();
+      } else {
+        // If we have the complete item data, add it to the list
+        setMarketplacePosts(prevItems => [newItem, ...prevItems]);
+      }
+      
+      setSnackbar({
+        open: true,
+        message: 'Item created successfully',
+        severity: 'success'
+      });
+    } else {
+      console.error('Invalid new item data received:', newItemData);
+      // Still refresh the list to ensure we have the latest data
+      handleRefreshMarketplaceItems();
+    }
+    setNewItemOpen(false);
+  };
+
+  const handleRefreshMarketplaceItems = async () => {
+    if (user?._id) {
+      setLoadingPosts(true);
+      try {
+        // Add timestamp to prevent caching
+        const timestamp = new Date().getTime();
+        const response = await axios.get(`/api/marketplace/items/user/${user._id}?_=${timestamp}`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        });
+        setMarketplacePosts(response.data || []);
+        
+        setSnackbar({
+          open: true,
+          message: 'Items refreshed successfully',
+          severity: 'success'
+        });
+      } catch (err) {
+        console.error('Error refreshing marketplace items:', err);
+      } finally {
+        setLoadingPosts(false);
+      }
+    }
+  };
+
+  const renderUserActivity = () => {
+    return (
+      <Paper
+        elevation={3}
+        sx={{
+          p: 3,
+          mt: 4,
+          borderRadius: '16px',
+          background: 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(8px)',
+          boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.5)'
+        }}
+      >
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h5" gutterBottom>
+            Your Activity
+          </Typography>
+        </Box>
+        <Tabs value={tabValue} onChange={handleTabChange} aria-label="activity tabs">
+          <Tab label="Marketplace" />
+          <Tab label="Lost & Found" />
+          <Tab label="Purchases" />
+          <Tab label="Sales" />
+          <Tab icon={<Badge badgeContent={messageCount} color="error" invisible={messageCount === 0}><MessageIcon /></Badge>} label="Messages" />
+        </Tabs>
+        <Divider sx={{ my: 2 }} />
+        {/* Marketplace Tab */}
+        <div role="tabpanel" hidden={tabValue !== 0} id="tabpanel-0" aria-labelledby="tab-0">
+          {marketplacePosts.length > 0 ? (
+            <List>
+              {marketplacePosts.map((post) => (
+                <ListItem key={post._id} divider sx={{ py: 2 }}>
+                  <ListItemAvatar>
+                    <Avatar 
+                      src={getItemImage(post)} 
+                      variant="rounded" 
+                      sx={{ width: 60, height: 60 }}
+                    >
+                      {(!post.images || post.images.length === 0) && !post.image ? post.title.charAt(0) : null}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={post.title}
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          ${post.price} • {post.category}
+                        </Typography>
+                        <br />
+                        {post.description.substring(0, 100)}
+                        {post.description.length > 100 ? '...' : ''}
+                      </>
+                    }
+                  />
+                  <ListItemSecondaryAction>
+                    <IconButton edge="end" onClick={() => handleViewItem(post)}>
+                      <PhotoCameraIcon />
+                    </IconButton>
+                    <IconButton edge="end" onClick={() => handleEditItem(post)}>
+                      <EditIcon />
+                    </IconButton>
+                    <IconButton edge="end" onClick={() => handleOpenDeleteDialog(post._id, 'marketplace')}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <Typography variant="body1" color="text.secondary" paragraph>
+                You haven't posted any items in the marketplace yet.
+              </Typography>
+              <Button 
+                variant="contained" 
+                startIcon={<StoreIcon />}
+                onClick={() => navigate('/marketplace/sell')}
+              >
+                Create Your First Post
+              </Button>
+            </Box>
+          )}
+        </div>
+        {/* Lost & Found Tab */}
+        <div role="tabpanel" hidden={tabValue !== 1} id="tabpanel-1" aria-labelledby="tab-1">
+          {lostFoundItems.length > 0 ? (
+            <List>
+              {lostFoundItems.map((item) => (
+                <ListItem key={item._id} divider sx={{ py: 2 }}>
+                  <ListItemAvatar>
+                    <Avatar 
+                      src={item.images && item.images.length > 0 ? 
+                        (item.images[0].startsWith('http') ? item.images[0] : `http://localhost:5000${item.images[0]}`) : 
+                        (item.image ? (item.image.startsWith('http') ? item.image : `http://localhost:5000${item.image}`) : '')} 
+                      variant="rounded" 
+                      sx={{ width: 60, height: 60 }}
+                    >
+                      {(!item.images || item.images.length === 0) && !item.image ? item.title.charAt(0) : null}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={item.title}
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          {item.category}
+                        </Typography>
+                        <br />
+                        {item.description.substring(0, 100)}
+                        {item.description.length > 100 ? '...' : ''}
+                      </>
+                    }
+                  />
+                  <ListItemSecondaryAction>
+                    <IconButton edge="end" onClick={() => handleOpenDeleteDialog(item._id, 'lostfound')}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <Typography variant="body1" color="text.secondary" paragraph>
+                You haven't posted any lost & found reports yet.
+              </Typography>
+            </Box>
+          )}
+        </div>
+        {/* Ride Shares Tab removed */}
+        {/* Purchases Tab */}
+        <div role="tabpanel" hidden={tabValue !== 2} id="tabpanel-2" aria-labelledby="tab-2">
+          {loadingPurchaseHistory ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : purchaseHistory.length > 0 ? (
+            <List>
+              {purchaseHistory.map((order) => (
+                <ListItem key={order._id} divider sx={{ py: 2 }}>
+                  <ListItemAvatar>
+                    <Avatar 
+                      src={order.item?.image || order.item?.images?.[0] || ''} 
+                      variant="rounded" 
+                      sx={{ width: 60, height: 60 }}
+                    >
+                      {!order.item?.image && !order.item?.images?.[0] ? (order.item?.title || '?').charAt(0) : null}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={order.item?.title || 'Untitled Item'}
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          ৳{order.total_amount?.toLocaleString() || '0'} • Purchased on {new Date(order.created_at).toLocaleDateString()}
+                        </Typography>
+                        <br />
+                        <Typography component="span" variant="body2">
+                          Seller: {order.other_party?.name || 'Unknown'}
+                        </Typography>
+                        <br />
+                        <Chip 
+                          size="small" 
+                          color="success" 
+                          label={order.status || 'Confirmed'} 
+                          sx={{ mt: 1 }}
+                        />
+                      </>
+                    }
+                  />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <Typography variant="body1" color="text.secondary" paragraph>
+                You haven't made any purchases yet.
+              </Typography>
+            </Box>
+          )}
+        </div>
+        {/* Sales Tab */}
+        <div role="tabpanel" hidden={tabValue !== 3} id="tabpanel-3" aria-labelledby="tab-3">
+          {loadingSellingHistory ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : sellingHistory.length > 0 ? (
+            <List>
+              {sellingHistory.map((order) => (
+                <ListItem key={order._id} divider sx={{ py: 2 }}>
+                  <ListItemAvatar>
+                    <Avatar 
+                      src={order.item?.image || order.item?.images?.[0] || ''} 
+                      variant="rounded" 
+                      sx={{ width: 60, height: 60 }}
+                    >
+                      {!order.item?.image && !order.item?.images?.[0] ? (order.item?.title || '?').charAt(0) : null}
+                    </Avatar>
+                  </ListItemAvatar>
+                  <ListItemText
+                    primary={order.item?.title || 'Untitled Item'}
+                    secondary={
+                      <>
+                        <Typography component="span" variant="body2" color="text.primary">
+                          ৳{order.total_amount?.toLocaleString() || '0'} • Sold on {new Date(order.created_at).toLocaleDateString()}
+                        </Typography>
+                        <br />
+                        <Typography component="span" variant="body2">
+                          Buyer: {order.other_party?.name || 'Unknown'}
+                        </Typography>
+                        <br />
+                        <Chip 
+                          size="small" 
+                          color="success" 
+                          label={order.status || 'Confirmed'} 
+                          sx={{ mt: 1 }}
+                        />
+                      </>
+                    }
+                  />
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <Typography variant="body1" color="text.secondary" paragraph>
+                You haven't made any sales yet.
+              </Typography>
+            </Box>
+          )}
+        </div>
+        {/* Messages Tab */}
+        <div role="tabpanel" hidden={tabValue !== 4} id="tabpanel-4" aria-labelledby="tab-4">
+          {/* Use the new MessageDisplay component */}
+          <MessageDisplay userId={user?.id || user?._id} />
+        </div>
+      </Paper>
+    );
+  };
+
+  return (
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      {/* Back to Dashboard Button and Logged-in Student Name */}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Button
+          variant="outlined"
+          color="primary"
+          onClick={() => navigate('/')}
+          sx={{ mr: 2 }}
+        >
+          Back to Home
+        </Button>
+          {/* Show logged-in student name */}
+          {user && (
+            <Typography variant="subtitle1" sx={{ fontWeight: 600, color: 'text.primary' }}>
+              Logged in as: {getUserDisplayName()}
+            </Typography>
+          )}
+      </Box>
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '70vh' }}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <>
+          {/* User Profile Section */}
+          <Paper 
+            elevation={3} 
+            sx={{ 
+              p: 3, 
+              borderRadius: '16px', 
+              mb: 4,
+              background: 'rgba(255, 255, 255, 0.85)',
+              backdropFilter: 'blur(8px)',
+              boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+              border: '1px solid rgba(255, 255, 255, 0.5)'
+            }}
+          >
+            <Grid container spacing={3}>
+              {/* Profile Image Section */}
+              <Grid item xs={12} md={4} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <Box sx={{ position: 'relative' }}>
+                  <Avatar 
+                    src={profileImage} 
+                    alt={getUserDisplayName()} 
+                    sx={{ 
+                      width: 200, 
+                      height: 200, 
+                      mb: 2,
+                      border: '3px solid #1976d2',
+                      boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
+                      bgcolor: 'secondary.main',
+                      fontSize: 80
+                    }}
+                  >
+                    {getUserDisplayName().charAt(0).toUpperCase()}
+                  </Avatar>
+                  {uploadingImage ? (
+                    <CircularProgress 
+                      size={30} 
+                      sx={{ 
+                        position: 'absolute', 
+                        bottom: 20, 
+                        right: 0 
+                      }} 
+                    />
+                  ) : (
+                    <Box sx={{ position: 'absolute', bottom: 20, right: 0, display: 'flex' }}>
+                      {profileImage && (
+                        <IconButton
+                          color="error"
+                          aria-label="delete picture"
+                          sx={{ 
+                            mr: 1,
+                            backgroundColor: 'white',
+                            '&:hover': { backgroundColor: '#f5f5f5' }
+                          }}
+                          onClick={handleDeleteProfilePicture}
+                        >
+                          <DeleteIcon />
+                        </IconButton>
+                      )}
+                      <IconButton
+                        color="primary"
+                        aria-label="upload picture"
+                        component="label"
+                        sx={{ 
+                          backgroundColor: 'white',
+                          '&:hover': { backgroundColor: '#f5f5f5' }
+                        }}
+                      >
+                        <input 
+                          hidden 
+                          accept="image/*" 
+                          type="file" 
+                          onChange={handleProfileImageChange} 
+                        />
+                        <PhotoCameraIcon />
+                      </IconButton>
+                    </Box>
+                  )}
+                </Box>
+                <Typography variant="h5" sx={{ fontWeight: 600 }}>
+                  {getUserDisplayName()}
+                </Typography>
+                <Typography variant="body1" color="text.secondary" gutterBottom>
+                  {user?.email || (loading ? 'Loading email...' : 'Email not available')}
+                </Typography>
+                
+                {/* ID Card View Section */}
+                <Box sx={{ 
+                  mt: 3, 
+                  width: '100%', 
+                  p: 2, 
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  background: 'rgba(255, 255, 255, 0.5)',
+                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.05)'
+                }}>
+                  <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 500 }}>
+                    ID Card
+                  </Typography>
+                  
+                  {idCardImage ? (
+                    <Box sx={{ position: 'relative', mb: 1 }}>
+                      <img 
+                        src={idCardImage} 
+                        alt="ID Card" 
+                        style={{ 
+                          width: '100%', 
+                          borderRadius: '4px',
+                          maxHeight: '120px',
+                          objectFit: 'contain',
+                          border: '1px solid rgba(0, 0, 0, 0.1)'
+                        }}
+                      />
+                    </Box>
+                  ) : user?.id_card_photo ? (
+                    <Box sx={{ position: 'relative', mb: 1 }}>
+                      <img 
+                        src={user.id_card_photo.startsWith('http') ? user.id_card_photo : `http://localhost:5000${user.id_card_photo}`} 
+                        alt="ID Card" 
+                        style={{ 
+                          width: '100%', 
+                          borderRadius: '4px',
+                          maxHeight: '120px',
+                          objectFit: 'contain',
+                          border: '1px solid rgba(0, 0, 0, 0.1)'
+                        }}
+                      />
+                    </Box>
+                  ) : (
+                    <Box sx={{ p: 2, bgcolor: 'rgba(0, 0, 0, 0.03)', borderRadius: '4px' }}>
+                      <Typography variant="body2" color="text.secondary">
+                        ID card image not available
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+                
+                {!editMode && (
+                  <Box sx={{ mt: 3, width: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <Button 
+                      variant="contained" 
+                      className="gradient-primary"
+                      fullWidth
+                      onClick={handleEditClick}
+                      startIcon={<EditIcon />}
+                    >
+                      Edit Profile
+                    </Button>
+                    <Button 
+                      variant="outlined" 
+                      color="error"
+                      fullWidth
+                      startIcon={<LogoutIcon />}
+                      onClick={handleLogout}
+                    >
+                      Logout
+                    </Button>
+                  </Box>
+                )}
+              </Grid>
+              
+              {/* User Details Section */}
+              <Grid item xs={12} md={8}>
+                <Typography variant="h5" gutterBottom sx={{ fontWeight: 600 }}>
+                  {editMode ? 'Edit Profile' : 'Profile Information'}
+                </Typography>
+                <Divider sx={{ mb: 3 }} />
+                
+                {editMode ? (
+                  <>
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Name"
+                          name="name"
+                          variant="outlined"
+                          value={updatedUser.name || ''}
+                          onChange={handleInputChange}
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Email"
+                          name="email"
+                          variant="outlined"
+                          value={updatedUser.email || ''}
+                          disabled
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Student ID"
+                          name="student_id"
+                          variant="outlined"
+                          value={updatedUser.student_id || ''}
+                          onChange={handleInputChange}
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Department"
+                          name="department"
+                          variant="outlined"
+                          value={updatedUser.department || ''}
+                          onChange={handleInputChange}
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Semester"
+                          name="semester"
+                          variant="outlined"
+                          value={updatedUser.semester || ''}
+                          onChange={handleInputChange}
+                        />
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <TextField
+                          fullWidth
+                          label="Phone"
+                          name="phone"
+                          variant="outlined"
+                          value={updatedUser.phone || ''}
+                          onChange={handleInputChange}
+                          placeholder="Add your phone number"
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          label="Address"
+                          name="address"
+                          variant="outlined"
+                          multiline
+                          rows={2}
+                          value={updatedUser.address || ''}
+                          onChange={handleInputChange}
+                        />
+                      </Grid>
+                    </Grid>
+                    
+                    <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button 
+                        variant="outlined" 
+                        color="error" 
+                        startIcon={<CancelIcon />} 
+                        sx={{ mr: 2 }}
+                        onClick={handleCancelEdit}
+                      >
+                        Cancel
+                      </Button>
+                      <Button 
+                        variant="contained" 
+                        color="primary" 
+                        startIcon={<SaveIcon />}
+                        onClick={handleSaveChanges}
+                      >
+                        Save Changes
+                      </Button>
+                    </Box>
+                  </>
+                ) : (
+                  <Grid container spacing={2}>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        Student ID
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {user?.student_id || 'Not provided'}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        Department
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {user?.department || 'Not provided'}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        Semester
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {user?.semester || 'Not provided'}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        Phone
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {user?.phone || 'Not provided'}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography variant="body2" color="text.secondary">
+                        Address
+                      </Typography>
+                      <Typography variant="body1" sx={{ mb: 2 }}>
+                        {user?.address || 'Not provided'}
+                      </Typography>
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography variant="body2" color="text.secondary">
+                        Account Status
+                      </Typography>
+                      <Typography 
+                        variant="body1" 
+                        sx={{ 
+                          color: user?.verification_status === 'approved' ? 'green' : 'orange',
+                          fontWeight: 600,
+                          mb: 2
+                        }}
+                      >
+                        {user?.verification_status === 'approved' ? 'Verified' : 'Pending Verification'}
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                )}
+              </Grid>
+            </Grid>
+          </Paper>
+          
+          {/* User Activity Section with Tabs */}
+          {renderUserActivity()}
+          
+          {/* Delete Confirmation Dialog */}
+          <Dialog
+            open={deleteDialog.open}
+            onClose={handleCloseDeleteDialog}
+            aria-labelledby="delete-dialog-title"
+            aria-describedby="delete-dialog-description"
+          >
+            <DialogTitle id="delete-dialog-title">
+              Confirm Delete
+            </DialogTitle>
+            <DialogContent>
+              <DialogContentText id="delete-dialog-description">
+                Are you sure you want to delete this {
+                  deleteDialog.postType === 'marketplace' ? 'marketplace item' : 
+                  deleteDialog.postType === 'lostfound' ? 'lost & found report' : 
+                  'ride request'
+                }? This action cannot be undone.
+              </DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={handleCloseDeleteDialog}>Cancel</Button>
+              <Button onClick={handleDeleteItem} color="error" autoFocus>
+                Delete
+              </Button>
+            </DialogActions>
+          </Dialog>
+          
+          {/* Item Details Dialog */}
+          {selectedItem && (
+            <MarketplaceItemDetailsDrawer
+              open={itemDetailsOpen}
+              item={selectedItem}
+              onClose={() => setItemDetailsOpen(false)}
+            />
+          )}
+          
+          {/* Edit Item Dialog */}
+          {selectedItemForEdit && (
+            <MarketplaceItemForm
+              open={editItemOpen}
+              onClose={() => setEditItemOpen(false)}
+              item={selectedItemForEdit}
+              isEdit={true}
+            />
+          )}
+          
+          {/* New Item Dialog */}
+          <MarketplaceItemForm
+            open={newItemOpen}
+            onClose={() => setNewItemOpen(false)}
+            isEdit={false}
+            onSuccess={handleNewItemSuccess}
+          />
+          
+          {/* Snackbar for notifications */}
+          <Snackbar
+            open={snackbar.open}
+            autoHideDuration={5000}
+            onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert 
+              onClose={() => setSnackbar(prev => ({ ...prev, open: false }))} 
+              severity={snackbar.severity} 
+              variant="filled"
+              sx={{ width: '100%' }}
+            >
+              {snackbar.message}
+            </Alert>
+          </Snackbar>
+        </>
+      )}
+    </Container>
+  );
+};
+
+export default UserProfile;

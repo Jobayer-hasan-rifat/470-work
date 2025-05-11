@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import withNotificationBanner from '../components/withNotificationBanner';
 import { 
   Container, 
   Typography, 
@@ -49,14 +48,102 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import CheckIcon from '@mui/icons-material/Check';
 import axios from 'axios';
 import '../AppBackgrounds.css';
-import { getItemImage } from '../utils/imageUtils';
+
+// Import the ContactDialog component for real-time messaging
+import ContactDialog from '../components/ContactDialog';
+import withNotificationBanner from '../components/withNotificationBanner';
 
 const Marketplace = () => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const currentUserId = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user'))._id || JSON.parse(localStorage.getItem('user')).id : '';
-  const currentUserEmail = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')).email : '';
+  const [contactDialogOpen, setContactDialogOpen] = useState(false);
+  // State for current user information
+  const [currentUserId, setCurrentUserId] = useState('');
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
+  
+  // Get current user on component mount
+  useEffect(() => {
+    const fetchCurrentUser = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          // If no token, user is not logged in
+          return;
+        }
+        
+        // Decode the JWT token to get user information
+        const tokenParts = token.split('.');
+        if (tokenParts.length === 3) {
+          try {
+            const payload = JSON.parse(atob(tokenParts[1]));
+            console.log('Token payload:', payload);
+            if (payload.sub) {
+              setCurrentUserId(payload.sub);
+              // If email is in the token, set it
+              if (payload.email) {
+                setCurrentUserEmail(payload.email);
+              }
+            }
+          } catch (e) {
+            console.error('Error decoding token:', e);
+          }
+        }
+        
+        // Also try the API endpoint as a backup
+        try {
+          const response = await axios.get('/api/auth/me', {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          
+          setCurrentUserId(response.data._id);
+          setCurrentUserEmail(response.data.email);
+        } catch (apiError) {
+          console.log('API endpoint for current user not available, using token data');
+        }
+      } catch (error) {
+        console.error('Error fetching current user:', error);
+      }
+    };
+    
+    fetchCurrentUser();
+  }, []);
+  
+  // Function to check if current user is the creator of an item
+  const isItemCreator = (item) => {
+    if (!item || !item.user_id || !currentUserId) return false;
+    
+    // Debug the comparison
+    console.log('Comparing item creator:', {
+      itemUserId: item.user_id,
+      currentUserId: currentUserId,
+      itemUserIdType: typeof item.user_id,
+      currentUserIdType: typeof currentUserId
+    });
+    
+    // Use string comparison to handle different ID formats
+    return String(item.user_id) === String(currentUserId);
+  };
+  
+  // Debug user information
+  useEffect(() => {
+    console.log('Current user information:', {
+      userId: currentUserId,
+      email: currentUserEmail,
+      type: typeof currentUserId
+    });
+    
+    // Log all items when loaded to understand structure
+    if (items.length > 0) {
+      console.log('All items:', items);
+      // Log each item's user_id for debugging
+      items.forEach((item, index) => {
+        console.log(`Item ${index} user_id:`, item.user_id);
+        // Debug the comparison for each item
+        console.log(`Is user the creator of item ${index}:`, isItemCreator(item));
+      });
+    }
+  }, [currentUserId, currentUserEmail, items]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState({
     category: '',
@@ -121,56 +208,19 @@ const Marketplace = () => {
   // State for chat dialog seller info
   const [chatSeller, setChatSeller] = useState(null);
 
-  // Send message to seller
-  const handleSendMessage = async () => {
-    if (!chatMessage.trim() || !chatSeller || !selectedItem) {
-      setNotification({
-        open: true,
-        message: 'Please enter a message',
-        severity: 'error'
-      });
-      return;
-    }
-    
-    try {
-      const token = localStorage.getItem('token');
-      const user = JSON.parse(localStorage.getItem('user'));
-      
-      // Get the user IDs properly
-      const senderId = user._id || user.id;
-      const receiverId = chatSeller._id || chatSeller.id;
-      
-      console.log('Sending message to:', chatSeller);
-      console.log('About item:', selectedItem);
-      
-      // Send message using the messages API endpoint for marketplace posts
-      const response = await axios.post(
-        `http://localhost:5000/api/marketplace/messages/post/marketplace/${selectedItem._id}/user/${receiverId}`,
-        { content: chatMessage },
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-      
-      setNotification({
-        open: true,
-        message: `Message sent to ${chatSeller.name}`,
-        severity: 'success'
-      });
-      
-      setChatMessage('');
-      setOpenChatDialog(false);
-    } catch (err) {
-      console.error('Error sending message:', err);
-      setNotification({
-        open: true,
-        message: `Failed to send message: ${err.response?.data?.error || err.message}`,
-        severity: 'error'
-      });
-    }
+  // Handle contact seller button click
+  const handleContactClick = (item) => {
+    setSelectedItem(item);
+    setContactDialogOpen(true);
+  };
+
+  // Placeholder for sending a message
+  const handleSendMessage = () => {
+    if (!chatMessage.trim()) return;
+    // Here you would send the message to the backend/chat system
+    alert(`Message sent to ${chatSeller?.name}: ${chatMessage}`);
+    setChatMessage("");
+    setOpenChatDialog(false);
   };
 
   const handleBuyNow = (item) => {
@@ -214,17 +264,14 @@ const Marketplace = () => {
   }, []);
 
   const fetchItems = (showLoading = true) => {
+    // Log the current user ID before fetching items
+    console.log('Fetching items with currentUserId:', currentUserId);
     if (showLoading) {
       setLoading(true);
     }
     
     // Try to get items from API first, fallback to localStorage
-    const token = localStorage.getItem('token');
-    axios.get('http://localhost:5000/api/marketplace/items', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    })
+    axios.get('/api/marketplace/items')
       .then(response => {
         // Ensure each item has a seller and createdAt
         const itemsWithSeller = response.data.map(item => ({
@@ -324,7 +371,7 @@ const Marketplace = () => {
     
     // Send to API
     const token = localStorage.getItem('token');
-    axios.post('http://localhost:5000/api/marketplace/items', formData, {
+    axios.post('/api/marketplace/items', formData, {
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data'
@@ -336,22 +383,12 @@ const Marketplace = () => {
       // Ensure price is always present
       if (typeof newItemData.price === 'undefined') newItemData.price = safePrice;
       
-      // Ensure the new item has a seller property
-      const newItemWithSeller = {
-        ...newItemData,
-        seller: newItemData.seller || {
-          id: localStorage.getItem('userId') || '',
-          name: localStorage.getItem('userName') || 'Current User',
-          email: localStorage.getItem('userEmail') || ''
-        }
-      };
-      
-      // Update local state immediately
-      setItems(prev => [newItemWithSeller, ...prev]);
+      // Update local state
+      setItems(prev => [newItemData, ...prev]);
       
       // Also update localStorage
       const existingItems = JSON.parse(localStorage.getItem('marketplaceItems') || '[]');
-      localStorage.setItem('marketplaceItems', JSON.stringify([newItemWithSeller, ...existingItems]));
+      localStorage.setItem('marketplaceItems', JSON.stringify([newItemData, ...existingItems]));
       
       // Reset the form and close the dialog
       setNewItem({
@@ -371,6 +408,9 @@ const Marketplace = () => {
         message: 'Item added successfully!',
         severity: 'success'
       });
+      
+      // Refresh items to ensure consistency with backend
+      fetchItems(false);
     })
     .catch(error => {
       console.error('Error adding item:', error);
@@ -545,7 +585,7 @@ const Marketplace = () => {
               React.createElement(CardMedia, {
                 component: "img",
                 height: "200",
-                image: getItemImage(item, "https://via.placeholder.com/300x200?text=No+Image"),
+                image: item.images?.[0] || "https://via.placeholder.com/300x200?text=No+Image",
                 alt: item.title
               }),
               React.createElement(CardContent, { sx: { flexGrow: 1 } },
@@ -564,13 +604,7 @@ const Marketplace = () => {
                   React.createElement(Chip, { 
                     label: item.condition, 
                     size: "small",
-                    color: "secondary",
-                    sx: { mr: 1 }
-                  }),
-                  item.status === 'sold' && React.createElement(Chip, {
-                    label: "SOLD",
-                    size: "small",
-                    color: "error"
+                    color: "secondary"
                   })
                 ),
                 React.createElement(Typography, { 
@@ -588,34 +622,31 @@ const Marketplace = () => {
               ),
               React.createElement(Box, { sx: { p: 2, pt: 0, mt: 'auto' } },
                 React.createElement(Grid, { container: true, spacing: 1 },
-                  // Show different buttons based on whether the user is the creator or if the item is sold
-                  item.status === 'sold' ?
-                  [
-                    React.createElement(Grid, { item: true, xs: 12, key: 'soldItem' },
-                      React.createElement(Button, {
-                        size: "small",
-                        fullWidth: true,
-                        variant: "outlined",
-                        color: "error",
-                        disabled: true,
-                        onClick: () => handleViewDetails(item)
-                      }, "Item Sold - View Details")
-                    )
-                  ] :
-                  (item.seller?.email === currentUserEmail || 
-                   item.seller?.id === currentUserId || 
-                   item.user_id === currentUserId) ?
-                  [
+                  // Show different buttons based on whether the user is the creator
+                  // Use the isItemCreator helper function to check
+                  isItemCreator(item) ?
+                  // If current user is the creator, show a message
+                  React.createElement(React.Fragment, null,
                     React.createElement(Grid, { item: true, xs: 12, key: 'yourItem' },
+                      React.createElement(Typography, {
+                        variant: "body2",
+                        color: "primary",
+                        align: "center",
+                        sx: { fontWeight: 'medium', py: 1 }
+                      }, "You Listed This Item")
+                    ),
+                    // Add View Details button for the creator as well
+                    React.createElement(Grid, { item: true, xs: 12, key: 'details' },
                       React.createElement(Button, {
                         size: "small",
                         fullWidth: true,
                         variant: "outlined",
-                        disabled: true
-                      }, "You Listed This Item")
+                        onClick: () => handleViewDetails(item)
+                      }, "View Details")
                     )
-                  ] :
-                  [
+                  ) :
+                  // If current user is not the creator, show all action buttons
+                  React.createElement(React.Fragment, null,
                     React.createElement(Grid, { item: true, xs: 12, key: 'details' },
                       React.createElement(Button, {
                         size: "small",
@@ -638,14 +669,12 @@ const Marketplace = () => {
                         fullWidth: true,
                         variant: "outlined",
                         onClick: () => {
-                          // Set both the seller and the item for proper message sending
                           setChatSeller(item.seller);
-                          setSelectedItem(item);
                           setOpenChatDialog(true);
                         }
                       }, "Contact Seller")
                     )
-                  ]
+                  )
                 )
               )
             )
@@ -682,7 +711,7 @@ const Marketplace = () => {
               React.createElement(Box, { sx: { position: 'relative', width: '100%', height: 300 } },
                 selectedItem.images && selectedItem.images.length > 0 ?
                   React.createElement('img', {
-                    src: selectedItem.images[0] || "https://via.placeholder.com/300x200?text=No+Image",
+                    src: selectedItem.images[0],
                     alt: selectedItem.title,
                     style: {
                       width: '100%',
@@ -711,10 +740,7 @@ const Marketplace = () => {
                         height: 60,
                         border: '1px solid #ddd',
                         cursor: 'pointer',
-                        '&:hover': { opacity: 0.8 },
-                        backgroundImage: `url(${img})`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center'
+                        '&:hover': { opacity: 0.8 }
                       }
                     },
                       React.createElement('img', {
@@ -753,8 +779,7 @@ const Marketplace = () => {
               React.createElement(Box, { sx: { mb: 2 } },
                 React.createElement(Typography, { variant: "subtitle2", gutterBottom: true },
                   "Seller: ",
-                  React.createElement('span', { style: { fontWeight: 600, color: '#1976d2' } }, selectedItem.seller?.name || 'Unknown Seller'),
-                  selectedItem.seller?.email ? ` (${selectedItem.seller.email})` : null
+                  React.createElement('span', { style: { fontWeight: 600, color: '#1976d2' } }, selectedItem.seller?.name || 'Unknown Seller')
                 ),
                 React.createElement(Typography, { variant: "body2", color: "text.secondary", gutterBottom: true },
                   "Posted on: ",
@@ -765,44 +790,42 @@ const Marketplace = () => {
                   )
                 )
               ),
-              // Only show Buy Now and Contact Seller buttons if the item is not sold and not created by the current user
-              (!selectedItem.status || selectedItem.status !== 'sold') && 
-              (!selectedItem.seller?.email || 
-               !(selectedItem.seller?.email === currentUserEmail || 
-                 selectedItem.seller?.id === currentUserId || 
-                 selectedItem.user_id === currentUserId)) ?
-                React.createElement(React.Fragment, null,
-                  React.createElement(Box, { sx: { mt: 3 } },
-                    React.createElement(Button, {
-                      variant: "contained",
-                      size: "large",
-                      fullWidth: true,
-                      startIcon: React.createElement(ShoppingCartIcon),
-                      onClick: () => handleBuyNow(selectedItem)
-                    }, "Buy Now")
-                  ),
-                  React.createElement(Button, {
-                    variant: "outlined",
-                    size: "large",
-                    fullWidth: true,
-                    sx: { mt: 2 },
-                    startIcon: React.createElement(ChatIcon),
-                    onClick: () => {
-                      setOpenDetailsDialog(false);
-                      setChatSeller(selectedItem.seller);
-                      setOpenChatDialog(true);
-                    }
-                  }, "Contact Seller")
-                ) : 
+              // Check if the current user is the creator of this item
+              // Use the isItemCreator helper function to check
+              isItemCreator(selectedItem) ?
+              // If current user is the creator, show a message
+              React.createElement(Box, { sx: { mt: 3, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 } },
+                React.createElement(Typography, {
+                  variant: "body1",
+                  color: "primary",
+                  align: "center",
+                  sx: { fontWeight: 'medium' }
+                }, "You Listed This Item")
+              ) :
+              // If current user is not the creator, show buy and contact buttons
+              React.createElement(React.Fragment, null,
                 React.createElement(Box, { sx: { mt: 3 } },
                   React.createElement(Button, {
-                    variant: "outlined",
+                    variant: "contained",
                     size: "large",
                     fullWidth: true,
-                    disabled: true,
-                    color: selectedItem.status === 'sold' ? "error" : "primary"
-                  }, selectedItem.status === 'sold' ? "Item Already Sold" : "You Listed This Item")
-                )
+                    startIcon: React.createElement(ShoppingCartIcon),
+                    onClick: () => handleBuyNow(selectedItem)
+                  }, "Buy Now")
+                ),
+                React.createElement(Button, {
+                  variant: "outlined",
+                  size: "large",
+                  fullWidth: true,
+                  sx: { mt: 2 },
+                  startIcon: React.createElement(ChatIcon),
+                  onClick: () => {
+                    setOpenDetailsDialog(false);
+                    setChatSeller(selectedItem.seller);
+                    setOpenChatDialog(true);
+                  }
+                }, "Contact Seller")
+              )
             )
           )
         )
@@ -1013,7 +1036,14 @@ const Marketplace = () => {
         React.createElement(Button, { onClick: () => setOpenAddDialog(false) }, "Cancel"),
         React.createElement(Button, { onClick: handleAddItem, variant: "contained" }, "Add Item")
       )
-    )
+    ),
+    // Add ContactDialog component at the end of your return statement
+    React.createElement(ContactDialog, {
+      open: contactDialogOpen,
+      onClose: () => setContactDialogOpen(false),
+      item: selectedItem,
+      itemType: 'marketplace'
+    })
   );
 };
 

@@ -92,7 +92,7 @@ const Login = () => {
     setError('');
     
     try {
-      const response = await api.post('/api/auth/login', {
+      const response = await api.post('/api/login', {
         identifier,
         password
       });
@@ -226,4 +226,4 @@ const Login = () => {
   );
 };
 
-export default Login; 
+export default Login;

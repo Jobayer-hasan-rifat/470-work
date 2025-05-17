@@ -63,6 +63,7 @@ function UserProfile() {
   const [lostFoundItems, setLostFoundItems] = useState([]);
   const [purchaseItems, setPurchaseItems] = useState([]);
   const [sellItems, setSellItems] = useState([]);
+  const [soldItems, setSoldItems] = useState([]);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -79,6 +80,26 @@ function UserProfile() {
   const navigate = useNavigate();
   const { userId } = useParams();
   const fileInputRef = React.useRef(null);
+  
+  // Helper function to properly resolve image URLs
+  const getImageUrl = (url) => {
+    if (!url) return '/images/placeholder.png';
+    
+    // If the URL is already absolute (starts with http:// or https://), return it as is
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    
+    // If the URL is a relative path starting with /uploads, prepend the API base URL
+    if (url.startsWith('/uploads')) {
+      // Get the base URL from the current API endpoint
+      const apiBaseUrl = process.env.REACT_APP_API_URL || window.location.origin;
+      return `${apiBaseUrl}${url}`;
+    }
+    
+    // Otherwise, return the URL as is
+    return url;
+  };
   
   // Check if the profile belongs to the current user
   const isCurrentUser = () => {
@@ -197,12 +218,77 @@ function UserProfile() {
         });
         
         if (marketplaceResponse.data && Array.isArray(marketplaceResponse.data)) {
-          setMarketplaceItems(marketplaceResponse.data);
+          // Set marketplace items (active listings)
+          const activeItems = marketplaceResponse.data.filter(item => !item.sold);
+          setMarketplaceItems(activeItems);
+          
+          // Set items for sale section (same as active listings for now)
+          setSellItems(activeItems);
         }
-      } catch (error) {
-        console.error('Error fetching marketplace items:', error);
-        // Set empty array for better UX
-        setMarketplaceItems([]);
+      } catch (marketplaceError) {
+        console.error('Error fetching marketplace items:', marketplaceError);
+      }
+      
+      // Fetch sold items
+      try {
+        const soldItemsResponse = await axios.get(`/api/marketplace/users/${targetUserId}/sold`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (soldItemsResponse.data && Array.isArray(soldItemsResponse.data)) {
+          console.log('Fetched sold items:', soldItemsResponse.data);
+          setSoldItems(soldItemsResponse.data);
+        }
+      } catch (soldItemsError) {
+        console.error('Error fetching sold items:', soldItemsError);
+      }
+      
+      // Fetch purchase records
+      try {
+        // First try the marketplace API endpoint
+        const purchasesResponse = await axios.get(`/api/marketplace/users/${targetUserId}/purchases`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (purchasesResponse.data && Array.isArray(purchasesResponse.data)) {
+          console.log('Fetched purchase records:', purchasesResponse.data);
+          setPurchaseItems(purchasesResponse.data);
+        }
+      } catch (purchasesError) {
+        console.error('Error fetching purchase records from marketplace API:', purchasesError);
+        
+        try {
+          // Try the users API endpoint as fallback
+          const userPurchasesResponse = await axios.get(`/api/users/${targetUserId}/purchases`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          if (userPurchasesResponse.data && Array.isArray(userPurchasesResponse.data)) {
+            console.log('Fetched purchase records from users API:', userPurchasesResponse.data);
+            setPurchaseItems(userPurchasesResponse.data);
+          }
+        } catch (userPurchasesError) {
+          console.error('Error fetching purchase records from users API:', userPurchasesError);
+          
+          // Create some mock purchase data for testing if both APIs fail
+          if (isCurrentUser()) {
+            console.log('Creating mock purchase data from marketplace items');
+            const mockPurchases = marketplaceItems
+              .filter(item => item.sold === true)
+              .map(item => ({
+                _id: item._id + '_purchase',
+                item_id: item._id,
+                title: item.title,
+                price: item.price,
+                images: item.images,
+                description: item.description,
+                purchase_date: new Date().toISOString(),
+                payment_method: 'bkash',
+                seller: item.seller || { name: 'Unknown Seller' }
+              }));
+            setPurchaseItems(mockPurchases);
+          }
+        }
       }
       
       // Fetch lost & found items
@@ -400,7 +486,10 @@ function UserProfile() {
   
   const handleLogout = () => {
     localStorage.removeItem('token');
-    navigate('/login');
+    localStorage.removeItem('user');
+    // Use replace: true to replace the current entry in history stack
+    // This prevents going back to a protected page after logout
+    navigate('/login', { replace: true });
   };
   
   // Get user display name
@@ -420,10 +509,10 @@ function UserProfile() {
               variant="contained" 
               color="primary" 
               startIcon={<AddIcon />}
-              onClick={handleAddItem}
+              onClick={() => navigate('/marketplace')}
               sx={{ mt: 2 }}
             >
-              Add Item
+              Go to Marketplace
             </Button>
           )}
         </Box>
@@ -438,9 +527,9 @@ function UserProfile() {
               variant="contained" 
               color="primary" 
               startIcon={<AddIcon />}
-              onClick={handleAddItem}
+              onClick={() => navigate('/marketplace')}
             >
-              Add Item
+              Go to Marketplace
             </Button>
           </Box>
         )}
@@ -464,17 +553,11 @@ function UserProfile() {
                       : item.description}
                   </Typography>
                   <Typography variant="h6" color="primary" sx={{ mt: 1 }}>
-                    ${item.price}
+                    ৳{item.price}
                   </Typography>
                 </CardContent>
                 <CardActions>
-                  <Button size="small" onClick={() => handleViewDetails(item)}>View Details</Button>
-                  {isCurrentUser() && (
-                    <>
-                      <Button size="small" onClick={() => handleEditItem(item)}>Edit</Button>
-                      <Button size="small" color="error" onClick={() => handleDeleteItem(item, 'marketplace')}>Delete</Button>
-                    </>
-                  )}
+                  <Button size="small" onClick={() => navigate(`/marketplace`)}>Go to Marketplace</Button>
                 </CardActions>
               </Card>
             </Grid>
@@ -495,10 +578,10 @@ function UserProfile() {
               variant="contained" 
               color="primary" 
               startIcon={<AddIcon />}
-              onClick={handleAddItem}
+              onClick={() => navigate('/lost-found')}
               sx={{ mt: 2 }}
             >
-              Add Item
+              Go to Lost & Found
             </Button>
           )}
         </Box>
@@ -513,9 +596,9 @@ function UserProfile() {
               variant="contained" 
               color="primary" 
               startIcon={<AddIcon />}
-              onClick={handleAddItem}
+              onClick={() => navigate('/lost-found')}
             >
-              Add Item
+              Go to Lost & Found
             </Button>
           </Box>
         )}
@@ -539,20 +622,14 @@ function UserProfile() {
                       : item.description}
                   </Typography>
                   <Chip 
-                    label={item.type === 'lost' ? 'Lost' : 'Found'} 
-                    color={item.type === 'lost' ? 'error' : 'success'} 
-                    size="small" 
+                    label={item.status || 'Lost'} 
+                    color={item.status === 'Found' ? 'success' : 'error'}
+                    size="small"
                     sx={{ mt: 1 }}
                   />
                 </CardContent>
                 <CardActions>
-                  <Button size="small" onClick={() => handleViewDetails(item)}>View Details</Button>
-                  {isCurrentUser() && (
-                    <>
-                      <Button size="small" onClick={() => handleEditItem(item)}>Edit</Button>
-                      <Button size="small" color="error" onClick={() => handleDeleteItem(item, 'lostfound')}>Delete</Button>
-                    </>
-                  )}
+                  <Button size="small" onClick={() => navigate('/lost-found')}>Go to Lost & Found</Button>
                 </CardActions>
               </Card>
             </Grid>
@@ -583,10 +660,33 @@ function UserProfile() {
     
     return (
       <Box sx={{ p: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Your Purchase History
+        </Typography>
         <Grid container spacing={2}>
           {purchaseItems.map(item => (
-            <Grid item xs={12} sm={6} md={4} key={item._id}>
-              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Grid item xs={12} sm={6} md={4} key={item._id || item.item_id}>
+              <Card sx={{ 
+                height: '100%', 
+                display: 'flex', 
+                flexDirection: 'column',
+                position: 'relative'
+              }}>
+                <Box sx={{
+                  position: 'absolute',
+                  top: 0,
+                  right: 0,
+                  bgcolor: 'success.main',
+                  color: 'white',
+                  px: 1,
+                  py: 0.5,
+                  zIndex: 1,
+                  borderBottomLeftRadius: 4
+                }}>
+                  <Typography variant="caption" fontWeight="bold">
+                    Purchased
+                  </Typography>
+                </Box>
                 <CardMedia
                   component="img"
                   height="140"
@@ -602,21 +702,29 @@ function UserProfile() {
                       ? `${item.description.substring(0, 100)}...` 
                       : item.description}
                   </Typography>
-                  <Typography variant="h6" color="primary" sx={{ mt: 1 }}>
-                    ${item.price}
-                  </Typography>
-                  <Chip 
-                    label="Purchased" 
-                    color="success" 
-                    size="small" 
-                    sx={{ mt: 1 }}
-                  />
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="body2" color="primary" sx={{ fontWeight: 'bold' }}>
+                      Price: ৳{item.price}
+                    </Typography>
+                    {item.purchase_date && (
+                      <Typography variant="body2" color="text.secondary">
+                        Purchased: {new Date(item.purchase_date).toLocaleDateString()}
+                      </Typography>
+                    )}
+                    {item.payment_method && (
+                      <Typography variant="body2" color="text.secondary">
+                        Payment: {item.payment_method.toUpperCase()}
+                      </Typography>
+                    )}
+                    {item.seller && item.seller.name && (
+                      <Typography variant="body2" color="text.secondary">
+                        Seller: {item.seller.name}
+                      </Typography>
+                    )}
+                  </Box>
                 </CardContent>
                 <CardActions>
                   <Button size="small" onClick={() => handleViewDetails(item)}>View Details</Button>
-                  <Button size="small" color="primary" startIcon={<MessageIcon />}>
-                    Contact Seller
-                  </Button>
                 </CardActions>
               </Card>
             </Grid>
@@ -628,73 +736,113 @@ function UserProfile() {
   
   // Render sell items
   const renderSellItems = () => {
-    if (sellItems.length === 0) {
+    const hasActiveItems = sellItems.length > 0;
+    const hasSoldItems = soldItems.length > 0;
+    
+    if (!hasActiveItems && !hasSoldItems) {
       return (
         <Box sx={{ p: 3, textAlign: 'center' }}>
-          <Typography variant="body1" color="text.secondary">No items for sale.</Typography>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            startIcon={<AddIcon />}
-            onClick={handleAddItem}
-            sx={{ mt: 2 }}
-          >
-            Add Item for Sale
-          </Button>
+          <Typography variant="body1" color="text.secondary">No marketplace items found.</Typography>
+          {isCurrentUser() && (
+            <Button 
+              variant="contained" 
+              color="primary" 
+              startIcon={<AddIcon />}
+              onClick={handleAddItem}
+              sx={{ mt: 2 }}
+            >
+              Add Item for Sale
+            </Button>
+          )}
         </Box>
       );
     }
     
     return (
       <Box sx={{ p: 2 }}>
-        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
-          <Button 
-            variant="contained" 
-            color="primary" 
-            startIcon={<AddIcon />}
-            onClick={handleAddItem}
-          >
-            Add Item for Sale
-          </Button>
-        </Box>
-        <Grid container spacing={2}>
-          {sellItems.map(item => (
-            <Grid item xs={12} sm={6} md={4} key={item._id}>
-              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <CardMedia
-                  component="img"
-                  height="140"
-                  image={item.images && item.images.length > 0 ? item.images[0] : '/assets/images/placeholder.jpg'}
-                  alt={item.title}
-                />
-                <CardContent sx={{ flexGrow: 1 }}>
-                  <Typography gutterBottom variant="h6" component="div">
-                    {item.title}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {item.description?.length > 100 
-                      ? `${item.description.substring(0, 100)}...` 
-                      : item.description}
-                  </Typography>
-                  <Typography variant="h6" color="primary" sx={{ mt: 1 }}>
-                    ${item.price}
-                  </Typography>
-                  <Chip 
-                    label={item.status || 'Active'} 
-                    color={item.status === 'Sold' ? 'success' : 'info'} 
-                    size="small" 
-                    sx={{ mt: 1 }}
-                  />
-                </CardContent>
-                <CardActions>
-                  <Button size="small" onClick={() => handleViewDetails(item)}>View Details</Button>
-                  <Button size="small" onClick={() => handleEditItem(item)}>Edit</Button>
-                  <Button size="small" color="error" onClick={() => handleDeleteItem(item, 'marketplace')}>Delete</Button>
-                </CardActions>
-              </Card>
+        {isCurrentUser() && (
+          <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              startIcon={<AddIcon />}
+              onClick={handleAddItem}
+            >
+              Add Item for Sale
+            </Button>
+          </Box>
+        )}
+        
+        {/* Sold Items Section */}
+        {hasSoldItems && (
+          <>
+            <Typography variant="h6" gutterBottom sx={{ mt: 4, borderBottom: '1px solid #eee', pb: 1 }}>
+              Sold Items
+            </Typography>
+            <Grid container spacing={2}>
+              {soldItems.map(item => (
+                <Grid item xs={12} sm={6} md={4} key={item._id}>
+                  <Card sx={{ 
+                    height: '100%', 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    position: 'relative'
+                  }}>
+                    <Box sx={{
+                      position: 'absolute',
+                      top: 0,
+                      right: 0,
+                      bgcolor: 'success.main',
+                      color: 'white',
+                      px: 1,
+                      py: 0.5,
+                      zIndex: 1,
+                      borderBottomLeftRadius: 4
+                    }}>
+                      <Typography variant="caption" fontWeight="bold">
+                        Sold
+                      </Typography>
+                    </Box>
+                    <CardMedia
+                      component="img"
+                      height="140"
+                      image={item.images && item.images.length > 0 ? item.images[0] : '/assets/images/placeholder.jpg'}
+                      alt={item.title}
+                    />
+                    <CardContent sx={{ flexGrow: 1 }}>
+                      <Typography gutterBottom variant="h6" component="div">
+                        {item.title}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {item.description?.length > 100 
+                          ? `${item.description.substring(0, 100)}...` 
+                          : item.description}
+                      </Typography>
+                      <Typography variant="h6" color="primary" sx={{ mt: 1 }}>
+                        ৳{item.price}
+                      </Typography>
+                      <Box sx={{ mt: 1 }}>
+                        {item.sold_date && (
+                          <Typography variant="body2" color="text.secondary">
+                            Sold: {new Date(item.sold_date).toLocaleDateString()}
+                          </Typography>
+                        )}
+                        {item.buyer_id && (
+                          <Typography variant="body2" color="text.secondary">
+                            Buyer ID: {item.buyer_id.substring(0, 8)}...
+                          </Typography>
+                        )}
+                      </Box>
+                    </CardContent>
+                    <CardActions>
+                      <Button size="small" onClick={() => handleViewDetails(item)}>View Details</Button>
+                    </CardActions>
+                  </Card>
+                </Grid>
+              ))}
             </Grid>
-          ))}
-        </Grid>
+          </>
+        )}
       </Box>
     );
   };

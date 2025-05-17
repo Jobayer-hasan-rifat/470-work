@@ -21,7 +21,13 @@ import {
   Checkbox,
   FormGroup,
   FormControlLabel,
-  Divider
+  Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  Slide
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
@@ -29,7 +35,15 @@ import CloseIcon from '@mui/icons-material/Close';
 import AnnouncementIcon from '@mui/icons-material/Announcement';
 import notificationService from '../services/notificationService';
 
+// Transition for the dialog
+const Transition = React.forwardRef(function Transition(props, ref) {
+  return <Slide direction="up" ref={ref} {...props} />;
+});
+
 function AnnouncementForm({ onClose }) {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [announcementToDelete, setAnnouncementToDelete] = useState(null);
+  
   const [formData, setFormData] = useState({
     message: '',
     pages: {
@@ -55,6 +69,12 @@ function AnnouncementForm({ onClose }) {
 
   useEffect(() => {
     loadNotifications();
+    
+    // Set up a polling interval to refresh announcements periodically
+    const intervalId = setInterval(loadNotifications, 30000); // Refresh every 30 seconds
+    
+    // Clean up interval on component unmount
+    return () => clearInterval(intervalId);
   }, []);
 
   const loadNotifications = async () => {
@@ -62,7 +82,10 @@ function AnnouncementForm({ onClose }) {
       setLoading(true);
       setError('');
       
-      const data = await notificationService.getAllAnnouncements();
+      // Add cache-busting parameter to ensure we get fresh data
+      const timestamp = new Date().getTime();
+      const data = await notificationService.getAllAnnouncements(`?_=${timestamp}`);
+      
       if (Array.isArray(data)) {
         setAnnouncements(data);
       } else {
@@ -131,11 +154,33 @@ function AnnouncementForm({ onClose }) {
       setError('');
       setSuccess('');
       
+      let updatedAnnouncement;
+      
       if (editingId) {
-        await notificationService.updateAnnouncement(editingId, formData);
+        // If editing, update the UI immediately
+        const response = await notificationService.updateAnnouncement(editingId, formData);
+        updatedAnnouncement = response.announcement;
+        
+        // Update the announcement in the local state
+        if (updatedAnnouncement) {
+          setAnnouncements(prevAnnouncements => 
+            prevAnnouncements.map(announcement => 
+              announcement._id === editingId ? updatedAnnouncement : announcement
+            )
+          );
+        }
+        
         setSuccess('Announcement updated successfully!');
       } else {
-        await notificationService.createAnnouncement(formData);
+        // If creating, add to UI after successful creation
+        const response = await notificationService.createAnnouncement(formData);
+        updatedAnnouncement = response.announcement;
+        
+        // Add the new announcement to the local state
+        if (updatedAnnouncement) {
+          setAnnouncements(prevAnnouncements => [updatedAnnouncement, ...prevAnnouncements]);
+        }
+        
         setSuccess('Announcement created successfully!');
       }
 
@@ -152,12 +197,12 @@ function AnnouncementForm({ onClose }) {
       });
       setEditingId(null);
       
-      // Reload announcements
+      // Refresh the list to ensure we're in sync with the server
       await loadNotifications();
     } catch (error) {
       console.error('Error submitting announcement:', error);
       setSuccess('');
-      setError(error.message || 'Failed to save announcement. Please try again.');
+      setError('Failed to save announcement: ' + (error.message || 'Please try again'));
     } finally {
       setLoading(false);
     }
@@ -190,16 +235,29 @@ function AnnouncementForm({ onClose }) {
     setSuccess('');
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this announcement?')) {
-      return;
-    }
+  const openDeleteDialog = (announcement) => {
+    setAnnouncementToDelete(announcement);
+    setDeleteDialogOpen(true);
+  };
 
+  const closeDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setAnnouncementToDelete(null);
+  };
+
+  const handleDelete = async (id) => {
+    // Close the dialog
+    setDeleteDialogOpen(false);
+    
     try {
       setLoading(true);
       setError('');
       setSuccess('');
       
+      // First update the UI immediately by removing the announcement from the local state
+      setAnnouncements(prevAnnouncements => prevAnnouncements.filter(announcement => announcement._id !== id));
+      
+      // Then send the delete request to the server
       await notificationService.deactivateAnnouncement(id);
       setSuccess('Announcement deleted successfully!');
       
@@ -219,11 +277,14 @@ function AnnouncementForm({ onClose }) {
         setEditingId(null);
       }
       
+      // Reload the announcements to ensure our UI is in sync with the server
       await loadNotifications();
     } catch (error) {
       console.error('Error deleting announcement:', error);
       setSuccess('');
       setError('Failed to delete announcement: ' + (error.message || 'Please try again'));
+      // If the delete failed, reload the announcements to restore the UI
+      await loadNotifications();
     } finally {
       setLoading(false);
     }
@@ -403,7 +464,7 @@ function AnnouncementForm({ onClose }) {
                     <EditIcon />
                   </IconButton>
                   <IconButton
-                    onClick={() => handleDelete(announcement._id)}
+                    onClick={() => openDeleteDialog(announcement)}
                     color="error"
                   >
                     <DeleteIcon />
@@ -434,6 +495,83 @@ function AnnouncementForm({ onClose }) {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        TransitionComponent={Transition}
+        keepMounted
+        onClose={closeDeleteDialog}
+        aria-describedby="delete-announcement-dialog"
+        PaperProps={{
+          sx: {
+            borderRadius: '12px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+            background: 'linear-gradient(145deg, #ffffff, #f5f5f5)',
+          }
+        }}
+      >
+        <DialogTitle sx={{ 
+          background: 'linear-gradient(90deg, #f44336, #e91e63)',
+          color: 'white',
+          fontWeight: 'bold',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1
+        }}>
+          <DeleteIcon /> Confirm Deletion
+        </DialogTitle>
+        <DialogContent sx={{ mt: 2, minWidth: '400px' }}>
+          <DialogContentText id="delete-announcement-dialog">
+            Are you sure you want to delete this announcement?
+          </DialogContentText>
+          {announcementToDelete && (
+            <Box sx={{ 
+              mt: 2, 
+              p: 2, 
+              backgroundColor: 'rgba(156, 39, 176, 0.05)', 
+              borderRadius: '8px',
+              border: '1px solid rgba(156, 39, 176, 0.2)'
+            }}>
+              <Typography variant="body1" sx={{ fontWeight: 'medium' }}>
+                {announcementToDelete.message}
+              </Typography>
+              <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+                Pages: {announcementToDelete.pages && Array.isArray(announcementToDelete.pages) ? 
+                  announcementToDelete.pages.map(page => 
+                    pageOptions.find(opt => opt.value === page)?.label || page
+                  ).join(', ') : 
+                  '—'}
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
+          <Button 
+            onClick={closeDeleteDialog} 
+            variant="outlined"
+            startIcon={<CloseIcon />}
+            sx={{ borderRadius: '20px' }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={() => announcementToDelete && handleDelete(announcementToDelete._id)} 
+            variant="contained" 
+            color="error"
+            startIcon={<DeleteIcon />}
+            sx={{ 
+              borderRadius: '20px',
+              boxShadow: '0 4px 12px rgba(244, 67, 54, 0.3)',
+              '&:hover': {
+                boxShadow: '0 6px 16px rgba(244, 67, 54, 0.4)',
+              }
+            }}
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

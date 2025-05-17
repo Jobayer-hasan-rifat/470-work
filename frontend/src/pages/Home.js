@@ -1,4 +1,4 @@
-import React, { memo, useEffect } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import { 
   Box, 
   Typography, 
@@ -17,6 +17,8 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import HowToRegIcon from '@mui/icons-material/HowToReg';
 import FacebookIcon from '@mui/icons-material/Facebook';
 import InstagramIcon from '@mui/icons-material/Instagram';
+import ScrollingAnnouncement from '../components/ScrollingAnnouncement';
+import notificationService from '../services/notificationService';
 
 // Memoized service card component for better performance
 const ServiceCard = memo(({ service, isLoggedIn, onServiceClick }) => (
@@ -66,6 +68,8 @@ const ServiceCard = memo(({ service, isLoggedIn, onServiceClick }) => (
 const Home = () => {
   const navigate = useNavigate();
   const isLoggedIn = localStorage.getItem('token');
+  const [announcements, setAnnouncements] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   // Add animation classes when component mounts
   useEffect(() => {
@@ -75,6 +79,31 @@ const Home = () => {
         element.classList.add('slide-up');
       }, index * 100);
     });
+  }, []);
+
+  // Fetch announcements for the home page
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      try {
+        setLoading(true);
+        const data = await notificationService.getPageAnnouncements('home');
+        if (Array.isArray(data)) {
+          setAnnouncements(data);
+        }
+      } catch (error) {
+        console.error('Error fetching announcements:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchAnnouncements();
+    
+    // Set up a polling interval to refresh announcements periodically
+    const intervalId = setInterval(fetchAnnouncements, 30000); // Refresh every 30 seconds
+    
+    // Clean up interval on component unmount
+    return () => clearInterval(intervalId);
   }, []);
 
   const handleServiceClick = (path) => {
@@ -119,6 +148,15 @@ const Home = () => {
       minHeight: '100vh',
       background: 'linear-gradient(to bottom, #e1f5fe, #ffffff)'
     }}>
+      {/* Display announcements at the top of the page */}
+      {announcements && announcements.length > 0 && (
+        <Container maxWidth="lg" sx={{ pt: 2 }}>
+          <ScrollingAnnouncement 
+            announcements={announcements} 
+            page="home" 
+          />
+        </Container>
+      )}
       {/* Banner Section */}
       <Box sx={{ 
         py: { xs: 5, md: 8 }, 

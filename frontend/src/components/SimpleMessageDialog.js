@@ -30,10 +30,13 @@ const SimpleMessageDialog = ({ open, onClose, item, itemType }) => {
   // Generate initial message based on item type
   useState(() => {
     if (item) {
+      console.log('Generating initial message for item:', item);
+      console.log('Item type:', itemType);
+      
       let initialMessage = '';
       switch (itemType) {
         case 'marketplace':
-          initialMessage = `Hi, I'm interested in your item "${item.title}". Is it still available?`;
+          initialMessage = `Hi, I'm interested in your item "${item.title || 'your listing'}". Is it still available?`;
           break;
         case 'ride':
           // Use the correct property for ride destination
@@ -41,10 +44,10 @@ const SimpleMessageDialog = ({ open, onClose, item, itemType }) => {
           initialMessage = `Hi, I'm interested in your ride to ${destination}. Is there still space available?`;
           break;
         case 'lost':
-          initialMessage = `Hi, I think I may have found your lost item "${item.title}". Can we connect?`;
+          initialMessage = `Hi, I think I may have found your lost item "${item.title || 'your item'}". Can we connect?`;
           break;
         case 'found':
-          initialMessage = `Hi, I think you may have found my item. The "${item.title}" you posted looks like mine. Can we connect?`;
+          initialMessage = `Hi, I think you may have found my item. The "${item.title || 'item'}" you posted looks like mine. Can we connect?`;
           break;
         default:
           initialMessage = `Hi, I'm contacting you about your post "${item.title || 'your listing'}".`;
@@ -55,11 +58,15 @@ const SimpleMessageDialog = ({ open, onClose, item, itemType }) => {
   }, [item, itemType]);
 
   const handleSendMessage = async () => {
-    if (!message.trim() || !item) return;
+    if (!message.trim() || !item) {
+      console.error('Cannot send message: message is empty or item is null', { message, item });
+      return;
+    }
 
     // Get current user ID from token
     const token = localStorage.getItem('token');
     if (!token) {
+      console.error('Cannot send message: no authentication token found');
       setSnackbar({
         open: true,
         message: 'Please log in to contact the user',
@@ -74,68 +81,142 @@ const SimpleMessageDialog = ({ open, onClose, item, itemType }) => {
       let userId;
       try {
         const decoded = jwtDecode(token);
-        userId = decoded.sub || decoded.user_id;
+        userId = decoded.sub || decoded.user_id || decoded._id || decoded.id;
         console.log('User ID from token:', userId);
       } catch (tokenError) {
-        console.error('Error decoding token:', tokenError);
-        throw new Error('Unable to authenticate. Please log in again.');
+        console.error('Error decoding token with jwtDecode:', tokenError);
+        
+        // Try manual parsing as fallback
+        try {
+          const base64Url = token.split('.')[1];
+          if (!base64Url) {
+            throw new Error('Invalid token format - missing payload section');
+          }
+          
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(atob(base64).split('').map(c => {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+          
+          const payload = JSON.parse(jsonPayload);
+          userId = payload.sub || payload.user_id || payload._id || payload.id;
+          
+          if (!userId) {
+            throw new Error('Token payload does not contain a user ID');
+          }
+          
+          console.log('User ID from manual token decode:', userId);
+        } catch (manualDecodeError) {
+          console.error('Manual token decode failed:', manualDecodeError);
+          throw new Error('Unable to authenticate. Please log in again.');
+        }
+      }
+
+      // Ensure we have a valid receiver ID
+      const receiverId = item.user_id || (item.seller && item.seller.id) || item.creator_id;
+      if (!receiverId) {
+        console.error('Cannot send message: no receiver ID found in item', item);
+        throw new Error('Cannot determine who to send this message to. Please try again later.');
+      }
+      
+      // Ensure we have a valid item ID
+      const itemId = item._id || item.id;
+      if (!itemId) {
+        console.error('Cannot send message: no item ID found', item);
+        // Continue anyway, but log the issue
       }
 
       console.log('Sending message with data:', {
         sender_id: userId,
-        receiver_id: item.user_id,
+        receiver_id: receiverId,
         content: message,
-        item_id: item._id,
+        item_id: itemId,
         item_type: itemType || 'general'
       });
       
       // Create a new message in the database
+      let messageSent = false;
+      
+      // First attempt - standard API endpoint
       try {
-        await axios.post('/api/messages', {
+        const response = await axios.post('/api/messages', {
           sender_id: userId,
-          receiver_id: item.user_id,
+          receiver_id: receiverId,
           content: message,
-          item_id: item._id,
-          item_type: itemType || 'general'
+          item_id: itemId,
+          item_type: itemType || 'general',
+          item_title: item.title || item.name || (item.from_location && item.to_location ? `${item.from_location} → ${item.to_location}` : undefined)
         }, {
           headers: {
             'Authorization': `Bearer ${token}`
           }
         });
+        
+        console.log('Message sent successfully via primary endpoint:', response.data);
+        messageSent = true;
       } catch (apiError) {
-        console.error('API error when sending message:', apiError);
-        // Try an alternative approach - direct socket.io message
+        console.error('API error when sending message via primary endpoint:', apiError);
+        
+        // Second attempt - direct socket.io message
         try {
-          // If the API call fails, we'll try to send the message directly to the backend
-          // This is a fallback mechanism
           const response = await axios.post('/api/messages/direct', {
             sender_id: userId,
-            receiver_id: item.user_id,
+            receiver_id: receiverId,
             content: message,
-            item_id: item._id,
+            item_id: itemId,
             item_type: itemType || 'general'
           }, {
             headers: {
               'Authorization': `Bearer ${token}`
             }
           });
-          console.log('Message sent via alternative route:', response.data);
+          
+          console.log('Message sent successfully via alternative route:', response.data);
+          messageSent = true;
         } catch (fallbackError) {
-          console.error('Fallback also failed:', fallbackError);
-          throw new Error('Could not send message through any available channel');
+          console.error('Fallback endpoint also failed:', fallbackError);
+          
+          // Third attempt - socket emit directly
+          try {
+            // If both API calls fail, try to emit a socket event directly
+            // This is a last resort fallback mechanism
+            const socketResponse = await axios.post('/api/socket/emit', {
+              event: 'new_message',
+              data: {
+                sender_id: userId,
+                receiver_id: receiverId,
+                content: message,
+                item_id: itemId,
+                item_type: itemType || 'general',
+                timestamp: new Date().toISOString()
+              }
+            }, {
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            });
+            
+            console.log('Message sent via socket emit:', socketResponse.data);
+            messageSent = true;
+          } catch (socketError) {
+            console.error('All message sending methods failed:', socketError);
+            throw new Error('Could not send message through any available channel');
+          }
         }
       }
 
-      setSnackbar({
-        open: true,
-        message: 'Message sent successfully! Check your profile messages to continue the conversation.',
-        severity: 'success'
-      });
+      if (messageSent) {
+        setSnackbar({
+          open: true,
+          message: 'Message sent successfully! Check your profile messages to continue the conversation.',
+          severity: 'success'
+        });
 
-      // Close dialog after a short delay
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+        // Close dialog after a short delay
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       setSnackbar({

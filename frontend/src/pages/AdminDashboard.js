@@ -50,6 +50,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import axios from 'axios';
+import { setupAdminAuth, adminApiRequest } from '../utils/adminAuth';
 import '../AppBackgrounds.css';
 import MarketplaceItemDetailsDrawer from '../components/MarketplaceItemDetailsDrawer';
 import RideShareList from '../components/RideShareList';
@@ -545,20 +546,23 @@ const AdminDashboard = () => {
   // Fetch ride share and bus routes data
   const fetchRideShareData = async (force = false) => {
     const now = Date.now();
-    if (!force && now - lastFetched.rideshare < CACHE_WINDOW) return;
+    
+    // Check if we should fetch new data based on cache window
+    if (!force && lastFetched.rideshare && now - lastFetched.rideshare < CACHE_WINDOW) return;
     if (refreshDebounce) return;
+    
     setRefreshDebounce(true);
     try {
       setLoading(true);
-      const adminToken = localStorage.getItem('adminToken');
-      if (!adminToken) throw new Error('Admin authentication required');
-      axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
+      
+      // Set up admin authentication
+      setupAdminAuth();
       const timestamp = new Date().getTime();
       
       // Use Promise.all to fetch both ride shares and bus routes in parallel
       const [rideShareResponse, busRoutesResponse] = await Promise.all([
-        axiosGetWithRetry(`/api/admin/rides?_=${timestamp}`),
-        axiosGetWithRetry(`/api/admin/bus-routes?_=${timestamp}`)
+        adminApiRequest(`/api/admin/rides?_=${timestamp}`),
+        adminApiRequest(`/api/admin/bus-routes?_=${timestamp}`)
       ]);
       
       // Process the ride share data to include user information
@@ -588,8 +592,8 @@ const AdminDashboard = () => {
       const busRoutes = busRoutesResponse.data || [];
       
       // Set state with the fetched data
-      setRideShareItems(ridesWithUserInfo || []);
-      setBusRoutes(busRoutes || []);
+      setRideShareItems(ridesWithUserInfo);
+      setBusRoutes(busRoutes);
       setLastFetched(prev => ({ ...prev, rideshare: Date.now() }));
       
       // Update stats with the new ride share and bus routes data
@@ -671,7 +675,7 @@ const AdminDashboard = () => {
       const adminToken = localStorage.getItem('adminToken');
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       // Use the correct API endpoint for deleting ride shares
-      const response = await axios.delete(`/api/ride/share/${rideShareToDelete._id}`);
+      const response = await axios.delete(`/api/admin/rides/${rideShareToDelete._id}`);
       
       setSnackbar({
         open: true,
@@ -726,7 +730,7 @@ const AdminDashboard = () => {
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       
       // Use the correct API endpoint for updating ride shares
-      const response = await axios.put(`/api/ride/share/${editRideShareData._id}`, editRideShareData);
+      const response = await axios.put(`/api/admin/rides/${editRideShareData._id}`, editRideShareData);
       
       setSnackbar({
         open: true,
@@ -871,6 +875,15 @@ const AdminDashboard = () => {
   const [marketplaceActionLoading, setMarketplaceActionLoading] = useState(''); // item id for which action is loading
 
   const handleEditMarketplaceItem = (item) => {
+    // Prevent editing sold items
+    if (item.sold) {
+      setSnackbar({
+        open: true,
+        message: 'Sold items cannot be edited, but they can be deleted',
+        severity: 'warning'
+      });
+      return;
+    }
     setEditMarketplaceData(item);
     setEditMarketplaceOpen(true);
   };
@@ -892,7 +905,9 @@ const AdminDashboard = () => {
       // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       
-      await axios.put(`/api/marketplace/items/${editMarketplaceData._id}`, editMarketplaceData);
+      // Use the admin-specific endpoint for marketplace item editing
+      // This endpoint bypasses regular user verification and allows admins to edit unsold items
+      await axios.put(`/api/admin/marketplace/items/${editMarketplaceData._id}`, editMarketplaceData);
       setEditMarketplaceOpen(false);
       setEditMarketplaceData(null);
       
@@ -950,7 +965,9 @@ const AdminDashboard = () => {
       // Set the authorization header
       axios.defaults.headers.common['Authorization'] = `Bearer ${adminToken}`;
       
-      await axios.delete(`/api/marketplace/items/${marketplaceToDelete._id}`);
+      // Use the admin-specific endpoint for marketplace item deletion
+      // This endpoint bypasses regular user verification and allows admins to delete any item
+      await axios.delete(`/api/admin/marketplace/items/${marketplaceToDelete._id}`);
       setDeleteMarketplaceOpen(false);
       setMarketplaceToDelete(null);
       
@@ -1082,6 +1099,13 @@ const AdminDashboard = () => {
   };
 
   const fetchDashboardData = async (showLoading = true) => {
+    // Check if we're on the admin dashboard page
+    const isAdminDashboard = window.location.pathname.includes('/admin');
+    if (!isAdminDashboard) {
+      console.log("Not on admin dashboard, skipping admin data fetch");
+      return;
+    }
+    
     if (refreshDebounce) return; // Prevent rapid refresh
     setRefreshDebounce(true);
     setTimeout(() => setRefreshDebounce(false), 2000); // 2s debounce
@@ -1103,9 +1127,12 @@ const AdminDashboard = () => {
         // Add timestamp to requests to prevent caching
         const timestamp = new Date().getTime();
         
+        // Set up admin authentication for all requests
+        setupAdminAuth();
+        
         // Get statistics with cache busting
         console.log("Fetching statistics...");
-        const statsResponse = await axiosGetWithRetry(`/api/admin/statistics?_=${timestamp}`);
+        const statsResponse = await adminApiRequest(`/api/admin/statistics?_=${timestamp}`);
         console.log("Statistics response:", statsResponse.data);
         
         // Get marketplace items count with cache busting
@@ -1114,7 +1141,7 @@ const AdminDashboard = () => {
         
         // Get ride share data with cache busting
         console.log("Fetching ride share data...");
-        const rideShareResponse = await axiosGetWithRetry(`/api/admin/rides?_=${timestamp}`);
+        const rideShareResponse = await adminApiRequest(`/api/admin/rides?_=${timestamp}`);
         console.log("Ride share response:", rideShareResponse.data);
         const rideShareItems = rideShareResponse.data || [];
         setRideShareItems(rideShareItems);
@@ -1158,9 +1185,8 @@ const AdminDashboard = () => {
         // Add timestamp to prevent caching
         const pendingTimestamp = new Date().getTime();
         
-        // Get pending users
-        console.log("Fetching pending users...");
-        const pendingResponse = await axiosGetWithRetry(`/api/admin/pending-users?_=${pendingTimestamp}`);
+        // Get pending users with cache busting
+        const pendingResponse = await adminApiRequest(`/api/admin/pending-users?_=${pendingTimestamp}`);
         console.log("Pending users response:", pendingResponse.data);
         
         // Check if there are new pending users that weren't in our list before
@@ -1200,9 +1226,8 @@ const AdminDashboard = () => {
         // Add timestamp to prevent caching
         const verifiedTimestamp = new Date().getTime();
         
-        // Get verified users
-        console.log("Fetching verified users...");
-        const verifiedResponse = await axiosGetWithRetry(`/api/admin/verified-users?_=${verifiedTimestamp}`);
+        // Get verified users with cache busting
+        const verifiedResponse = await adminApiRequest(`/api/admin/verified-users?_=${verifiedTimestamp}`);
         console.log("Verified users response:", verifiedResponse.data);
         
         // Check if there are changes in the verified users list
@@ -3400,13 +3425,7 @@ const AdminDashboard = () => {
         }}
       >
         <Toolbar /> {/* Spacer for AppBar */}
-        {/* Display announcements at the top of the page */}
-        {announcements && announcements.length > 0 && (
-          <ScrollingAnnouncement 
-            announcements={announcements} 
-            page={activeView === 'dashboard' ? 'home' : activeView} 
-          />
-        )}
+        {/* Admin panel should not display announcements */}
         {renderContent()}
       </Box>
 

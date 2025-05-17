@@ -91,6 +91,7 @@ def create_app():
     from app.routes.announcement_routes import announcement_bp
     from app.controllers.admin_rides import admin_rides_bp
     from app.controllers.admin_lost_found import admin_lost_found_bp
+    from app.controllers.admin_marketplace import admin_marketplace_bp
     
     app.register_blueprint(auth_bp, url_prefix='/api/auth')
     app.register_blueprint(marketplace_bp, url_prefix='/api/marketplace')
@@ -104,6 +105,7 @@ def create_app():
     app.register_blueprint(announcement_bp)
     app.register_blueprint(admin_rides_bp, url_prefix='/api/admin')
     app.register_blueprint(admin_lost_found_bp, url_prefix='/api/admin')
+    app.register_blueprint(admin_marketplace_bp, url_prefix='/api/admin')
     
     # Serve uploaded files with caching
     @app.route('/uploads/<path:filename>')

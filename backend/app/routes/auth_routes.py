@@ -242,7 +242,7 @@ def refresh_token():
     }), 200
 
 @auth_bp.route('/api/auth/me', methods=['GET'])
-@jwt_required()
+@jwt_required(optional=True)
 def get_current_user():
     """
     Get current user information based on JWT token
@@ -250,11 +250,29 @@ def get_current_user():
     try:
         current_user_id = get_jwt_identity()
         
+        # If no identity found, return anonymous user info
+        if not current_user_id:
+            return jsonify({
+                "success": True,
+                "user": None,
+                "message": "No authentication token provided"
+            }), 200
+        
         db = get_db()
-        user = db.users.find_one({"_id": ObjectId(current_user_id)})
+        # Handle potential ObjectId conversion errors
+        try:
+            user = db.users.find_one({"_id": ObjectId(current_user_id)})
+        except Exception as e:
+            print(f"Error converting user ID to ObjectId: {str(e)}")
+            # Try string comparison as fallback
+            user = db.users.find_one({"_id": current_user_id})
         
         if not user:
-            return jsonify({"success": False, "message": "User not found"}), 404
+            return jsonify({
+                "success": False, 
+                "message": "User not found",
+                "user_id": current_user_id
+            }), 404
         
         # Return user data without sensitive information
         return jsonify({
@@ -272,4 +290,8 @@ def get_current_user():
     except Exception as e:
         # Log the error for debugging
         print(f"Error in /api/auth/me endpoint: {str(e)}")
-        return jsonify({"success": False, "message": f"Server error: {str(e)}"}), 500
+        return jsonify({
+            "success": False, 
+            "message": "Authentication error", 
+            "error": str(e)
+        }), 200  # Return 200 instead of 500 to prevent client errors

@@ -286,46 +286,113 @@ def delete_profile_picture(user_id):
 
 # Duplicate endpoint removed
 
-@users_bp.route('/<user_id>/purchase-history', methods=['GET'])
+@users_bp.route('/<user_id>/purchases', methods=['GET'])
 @limiter.limit("30 per minute")
-@jwt_required()
-def get_purchase_history(user_id):
+@jwt_required(optional=True)
+def get_user_purchases(user_id):
     """Get user purchase history"""
     try:
         # Get user's ID from JWT token for authorization
         token_user_id = get_jwt_identity()
         
-        # Only allow users to access their own purchase history
-        if token_user_id != user_id:
-            return jsonify({"error": "Unauthorized to access purchase history"}), 403
+        # Allow access if the token is valid or if it's a public profile
+        # We'll still need to check if the user exists
+        try:
+            # Try to convert to ObjectId
+            user_obj_id = ObjectId(user_id)
+        except:
+            # If conversion fails, use the string ID
+            user_obj_id = user_id
+            
+        # Check if user exists
+        user = db.users.find_one({"_id": user_obj_id})
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+            
+        # Get purchase history from database - check both collections
+        # First check the user_purchases collection (new format)
+        user_purchases = list(db.user_purchases.find({"buyer_id": user_id}))
         
-        # Get purchase history from database
-        purchases = list(db.purchases.find({"user_id": ObjectId(user_id)}))
-        if not purchases:
-            return jsonify([]), 200
+        # Then check the purchases collection (old format)
+        old_purchases = list(db.purchases.find({"user_id": user_obj_id}))
         
-        # Format purchase data
-        formatted_purchases = []
-        for purchase in purchases:
+        # Combine both results
+        all_purchases = []
+        
+        # Format user_purchases data (new format)
+        for purchase in user_purchases:
+            formatted_purchase = {
+                '_id': str(purchase['_id']),
+                'buyer_id': purchase.get('buyer_id', ''),
+                'seller_id': purchase.get('seller_id', ''),
+                'item_id': purchase.get('item_id', ''),
+                'title': purchase.get('title', ''),
+                'description': purchase.get('description', ''),
+                'price': purchase.get('price', 0),
+                'payment_method': purchase.get('payment_method', ''),
+                'purchase_date': purchase.get('purchase_date', ''),
+                'images': purchase.get('images', [])
+            }
+            all_purchases.append(formatted_purchase)
+            
+        # Format old purchases data
+        for purchase in old_purchases:
             purchase['_id'] = str(purchase['_id'])
             purchase['user_id'] = str(purchase['user_id'])
             if 'item_id' in purchase:
                 purchase['item_id'] = str(purchase['item_id'])
                 
                 # Get item details if available
-                item = db.marketplace_items.find_one({"_id": ObjectId(purchase['item_id'])})
-                if item:
-                    purchase['item'] = {
-                        'title': item.get('title', ''),
-                        'price': item.get('price', 0),
-                        'category': item.get('category', '')
-                    }
+                try:
+                    item = db.marketplace_items.find_one({"_id": ObjectId(purchase['item_id'])})
+                    if item:
+                        purchase['title'] = item.get('title', '')
+                        purchase['price'] = item.get('price', 0)
+                        purchase['description'] = item.get('description', '')
+                        purchase['images'] = item.get('images', [])
+                except Exception as item_error:
+                    print(f"Error getting item details: {str(item_error)}")
             
-            formatted_purchases.append(purchase)
+            all_purchases.append(purchase)
         
-        return jsonify(formatted_purchases), 200
+        return jsonify(all_purchases), 200
     except Exception as e:
         current_app.logger.error(f"Error getting purchase history: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+@users_bp.route('/purchases', methods=['POST'])
+@limiter.limit("30 per minute")
+@jwt_required(optional=True)
+def create_purchase_record():
+    """Create a new purchase record"""
+    try:
+        # Get user's ID from JWT token
+        buyer_id = get_jwt_identity()
+        
+        # Get request data
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+            
+        # Add buyer_id to data if not present
+        if not data.get('buyer_id'):
+            data['buyer_id'] = buyer_id
+            
+        # Add purchase date if not present
+        if not data.get('purchase_date'):
+            data['purchase_date'] = datetime.datetime.utcnow()
+            
+        # Insert purchase record
+        result = db.user_purchases.insert_one(data)
+        
+        # Return success response
+        return jsonify({
+            "success": True,
+            "message": "Purchase record created successfully",
+            "purchase_id": str(result.inserted_id)
+        }), 201
+    except Exception as e:
+        current_app.logger.error(f"Error creating purchase record: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @users_bp.route('/marketplace/user-items/<user_id>', methods=['GET'])

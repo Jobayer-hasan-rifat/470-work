@@ -14,6 +14,8 @@ class Message:
             "receiver_id": ObjectId(data["receiver_id"]),
             "content": data["content"],
             "item_id": ObjectId(data["item_id"]) if data.get("item_id") else None,
+            "item_type": data.get("item_type"),  # Type of item (marketplace, ride, etc.)
+            "item_title": data.get("item_title"),  # Title of the item for display
             "image_url": data.get("image_url"),  # Support for image attachments
             "read": False,
             "created_at": datetime.utcnow()
@@ -81,6 +83,15 @@ class Message:
                     "email": other_user.get("email", "")
                 }
             
+            # Check for unread messages
+            unread_count = db.messages.count_documents({
+                "sender_id": other_id,
+                "receiver_id": ObjectId(user_id),
+                "read": False
+            })
+            conv["unread"] = unread_count > 0
+            conv["unread_count"] = unread_count
+            
             # Convert ObjectIds to strings
             conv["participant1_id"] = str(conv["participant1_id"])
             conv["participant2_id"] = str(conv["participant2_id"])
@@ -90,15 +101,25 @@ class Message:
     @staticmethod
     def get_conversation_messages(user_id, other_user_id):
         """Get messages between two users"""
+        # Ensure that only messages between these two specific users are returned
+        # This prevents privacy issues where users can see messages not meant for them
         messages = list(db.messages.find({
-            "$or": [
+            "$and": [
+                # Either user_id is the sender OR user_id is the receiver
+                # This ensures the current user is part of the conversation
                 {
-                    "sender_id": ObjectId(user_id),
-                    "receiver_id": ObjectId(other_user_id)
+                    "$or": [
+                        {"sender_id": ObjectId(user_id)},
+                        {"receiver_id": ObjectId(user_id)}
+                    ]
                 },
+                # AND either other_user_id is the sender OR other_user_id is the receiver
+                # This ensures the other user is part of the conversation
                 {
-                    "sender_id": ObjectId(other_user_id),
-                    "receiver_id": ObjectId(user_id)
+                    "$or": [
+                        {"sender_id": ObjectId(other_user_id)},
+                        {"receiver_id": ObjectId(other_user_id)}
+                    ]
                 }
             ]
         }).sort("created_at", 1))  # Sort in ascending order to show oldest messages first
@@ -161,3 +182,22 @@ class Message:
         except Exception as e:
             print(f"Error marking message as read: {str(e)}")
             return False
+            
+    @staticmethod
+    def mark_conversation_read(user_id, other_user_id):
+        """Mark all messages in a conversation as read"""
+        try:
+            # Update all unread messages from the other user to this user
+            result = db.messages.update_many(
+                {
+                    "sender_id": ObjectId(other_user_id),
+                    "receiver_id": ObjectId(user_id),
+                    "read": False
+                },
+                {"$set": {"read": True}}
+            )
+            
+            return result.modified_count
+        except Exception as e:
+            print(f"Error marking conversation as read: {str(e)}")
+            return 0

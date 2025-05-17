@@ -47,7 +47,12 @@ def delete_ride(ride_id):
     """Delete a ride share post (admin only)"""
     try:
         db = get_db()
-        result = db.share_rides.delete_one({'_id': ObjectId(ride_id)})
+        # Safely handle ObjectId conversion
+        try:
+            result = db.share_rides.delete_one({'_id': ObjectId(ride_id)})
+        except:
+            # If ride_id is not a valid ObjectId, return an error
+            return jsonify({'error': 'Invalid ride ID format'}), 400
         
         if result.deleted_count == 0:
             return jsonify({'error': 'Ride not found'}), 404

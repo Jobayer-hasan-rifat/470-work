@@ -2,6 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { jwtDecode as jwt_decode } from 'jwt-decode';
 import { io } from 'socket.io-client';
+import ShoppingBagIcon from '@mui/icons-material/ShoppingBag';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import SearchIcon from '@mui/icons-material/Search';
+import FindInPageIcon from '@mui/icons-material/FindInPage';
+import InfoIcon from '@mui/icons-material/Info';
+import LinkIcon from '@mui/icons-material/Link';
 import {
   Box,
   Paper,
@@ -19,7 +25,9 @@ import {
   Tooltip,
   Snackbar,
   Alert,
-  Divider
+  Divider,
+  Dialog,
+  DialogContent
 } from '@mui/material';
 import SendIcon from '@mui/icons-material/Send';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -27,6 +35,7 @@ import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import PersonIcon from '@mui/icons-material/Person';
 import CloseIcon from '@mui/icons-material/Close';
+import InsertPhotoIcon from '@mui/icons-material/InsertPhoto';
 
 const MessageDisplay = ({ userId }) => {
   const [conversations, setConversations] = useState([]);
@@ -44,6 +53,8 @@ const MessageDisplay = ({ userId }) => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [snackbarSeverity, setSnackbarSeverity] = useState('info');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   
@@ -69,8 +80,75 @@ const MessageDisplay = ({ userId }) => {
       setIsSocketConnected(false);
     });
     
-    socketInstance.on('new_message', (message) => {
+    // Clean up on unmount
+    return () => {
+      socketInstance.off('connect');
+      socketInstance.off('disconnect');
+      socketInstance.disconnect();
+    };
+  }, [userId]);
+  
+  // Open the delete confirmation dialog
+  const openDeleteDialog = (conversation) => {
+    setConversationToDelete(conversation);
+    setDeleteDialogOpen(true);
+  };
+
+  // Close the delete confirmation dialog
+  const closeDeleteDialog = () => {
+    setDeleteDialogOpen(false);
+    setConversationToDelete(null);
+  };
+  
+  // Function to delete a conversation and all its messages
+  const handleDeleteConversation = () => {
+    if (!conversationToDelete) return;
+    
+    const conversationId = conversationToDelete._id;
+    
+    // Close the dialog
+    closeDeleteDialog();
+    
+    axios.delete(`/api/messages/conversations/${conversationId}`)
+      .then(response => {
+        if (response.data && response.data.status === 'success') {
+          // Remove the conversation from the list
+          setConversations(prevConversations => 
+            prevConversations.filter(conv => conv._id !== conversationId)
+          );
+          
+          // If this was the selected conversation, clear it
+          if (selectedConversation && selectedConversation._id === conversationId) {
+            setSelectedConversation(null);
+            setMessages([]);
+          }
+          
+          showSnackbar('Conversation deleted successfully', 'success');
+        }
+      })
+      .catch(error => {
+        console.error('Error deleting conversation:', error);
+        showSnackbar('Failed to delete conversation. Please try again.', 'error');
+      });
+  };
+  
+  // Socket.IO event handlers
+  useEffect(() => {
+    // If no socket or userId, or if socket isn't connected yet, don't proceed
+    if (!socket || !userId || !isSocketConnected) return;
+    
+    // Listen for new messages
+    socket.on('new_message', (message) => {
       console.log('New message received:', message);
+      
+      // PRIVACY FIX: Only process messages if they are meant for the current user
+      // This ensures users can only see messages they sent or received
+      const isMessageForCurrentUser = message.sender_id === userId || message.receiver_id === userId;
+      
+      if (!isMessageForCurrentUser) {
+        console.log('Message not for current user, ignoring');
+        return;
+      }
       
       // Add message to the list if it belongs to the current conversation
       if (selectedConversation) {
@@ -81,29 +159,93 @@ const MessageDisplay = ({ userId }) => {
         
         if (isForCurrentConversation) {
           // Add the new message to the messages list
-          setMessages(prevMessages => [...prevMessages, message]);
+          setMessages(prevMessages => {
+            // Check if the message is already in the list to prevent duplicates
+            const messageExists = prevMessages.some(msg => 
+              msg._id === message._id || 
+              (msg.content === message.content && 
+               msg.sender_id === message.sender_id && 
+               Math.abs(new Date(msg.created_at) - new Date(message.created_at)) < 5000)
+            );
+            
+            if (messageExists) {
+              return prevMessages;
+            }
+            return [...prevMessages, message];
+          });
           
           // Mark the message as read if it's from the other user
           if (message.sender_id === selectedConversation.other_participant?.id) {
             markConversationAsRead(selectedConversation._id);
           }
+        } else {
+          // If it's a new message not in the current conversation, update the unread status
+          setConversations(prevConversations => {
+            return prevConversations.map(conv => {
+              // Check if this message belongs to this conversation
+              const isForThisConversation = 
+                (conv.other_participant?.id === message.sender_id && message.receiver_id === userId) ||
+                (conv.other_participant?.id === message.receiver_id && message.sender_id === userId);
+              
+              if (isForThisConversation) {
+                return {
+                  ...conv,
+                  last_message: message.content,
+                  last_message_time: message.created_at,
+                  unread: message.sender_id !== userId, // Mark as unread if the sender is not the current user
+                  unread_count: conv.unread_count ? conv.unread_count + 1 : 1
+                };
+              }
+              return conv;
+            });
+          });
         }
+      } else {
+        // No conversation selected, just update the conversations list
+        fetchConversations();
       }
-      
-      // Always update conversations list to show the latest message
-      fetchConversations();
     });
     
-    socketInstance.on('error', (error) => {
+    // Listen for message read status updates
+    socket.on('message_read', (data) => {
+      console.log('Message read:', data);
+      
+      // Update message read status in the current conversation
+      setMessages(prevMessages => 
+        prevMessages.map(msg => 
+          msg._id === data.message_id ? { ...msg, read: true } : msg
+        )
+      );
+    });
+    
+    // Listen for conversation read status updates
+    socket.on('conversation_read', (data) => {
+      console.log('Conversation read:', data);
+      
+      // Update all messages in the conversation to read
+      if (selectedConversation && selectedConversation._id === data.conversation_id) {
+        setMessages(prevMessages => 
+          prevMessages.map(msg => 
+            msg.sender_id === userId && !msg.read ? { ...msg, read: true } : msg
+          )
+        );
+      }
+    });
+    
+    // Listen for socket errors
+    socket.on('error', (error) => {
       console.error('Socket error:', error);
       showSnackbar(error.message || 'An error occurred', 'error');
     });
     
-    // Clean up on unmount
+    // Clean up event listeners when component unmounts or dependencies change
     return () => {
-      socketInstance.disconnect();
+      socket.off('new_message');
+      socket.off('message_read');
+      socket.off('conversation_read');
+      socket.off('error');
     };
-  }, [userId, selectedConversation]);
+  }, [socket, userId, selectedConversation, isSocketConnected]);
   
   // Fetch conversations whenever the component mounts or userId changes
   useEffect(() => {
@@ -142,7 +284,21 @@ const MessageDisplay = ({ userId }) => {
         return;
       }
       
-      const response = await axios.get('/api/messages/conversations', {
+      // Get the current user ID from token for comparison
+      let currentUserId;
+      try {
+        const decoded = jwt_decode(token);
+        currentUserId = decoded.sub || decoded.user_id;
+      } catch (e) {
+        console.error('Error decoding token:', e);
+      }
+      
+      // If we're viewing someone else's profile, we need to fetch conversations with that user
+      const endpoint = currentUserId !== userId 
+        ? `/api/messages/conversations/with/${userId}` 
+        : '/api/messages/conversations';
+      
+      const response = await axios.get(endpoint, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -205,37 +361,51 @@ const MessageDisplay = ({ userId }) => {
   // Handle selecting a conversation
   const handleSelectConversation = (conversation) => {
     setSelectedConversation(conversation);
-    setError(null);
+    setMessages([]);
+    setLoading(true);
     
-    // Mark conversation as read when selected
-    if (conversation && conversation._id) {
-      markConversationAsRead(conversation._id);
-    }
+    // Fetch messages for the selected conversation
+    axios.get(`/api/messages/conversations/${conversation._id}`)
+      .then(response => {
+        if (response.data && response.data.status === 'success') {
+          setMessages(response.data.data);
+          
+          // Mark conversation as read if it has unread messages
+          if (conversation.unread) {
+            markConversationAsRead(conversation._id);
+          }
+        }
+      })
+      .catch(error => {
+        console.error('Error fetching messages:', error);
+        setError('Failed to load messages');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   };
   
   // Mark conversation as read
-  const markConversationAsRead = async (conversationId) => {
-    if (!conversationId || !userId) return;
-    
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      
-      await axios.put(`/api/messages/conversations/${conversationId}/read`, {}, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+  const markConversationAsRead = (conversationId) => {
+    axios.put(`/api/messages/conversations/${conversationId}/read`)
+      .then(response => {
+        if (response.data && response.data.status === 'success') {
+          // Update conversations list to reflect read status
+          setConversations(prevConversations => 
+            prevConversations.map(conv => 
+              conv._id === conversationId ? { ...conv, unread: false, unread_count: 0 } : conv
+            )
+          );
+          
+          // Update selected conversation if it's the one being marked as read
+          if (selectedConversation && selectedConversation._id === conversationId) {
+            setSelectedConversation(prev => ({ ...prev, unread: false, unread_count: 0 }));
+          }
         }
+      })
+      .catch(error => {
+        console.error('Error marking conversation as read:', error);
       });
-      
-      // Update the UI to show messages as read
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.receiver_id === userId && !msg.read ? { ...msg, read: true } : msg
-        )
-      );
-    } catch (error) {
-      console.error('Error marking conversation as read:', error);
-    }
   };
   
   // Handle input change
@@ -272,10 +442,14 @@ const MessageDisplay = ({ userId }) => {
   const handleSendMessage = async (e) => {
     e?.preventDefault();
     
-    if ((!newMessage.trim() && attachments.length === 0) || !selectedConversation) return;
+    if ((!newMessage.trim() && attachments.length === 0) || !selectedConversation || sendingMessage) return;
     
     setSendingMessage(true);
     setError(null);
+    
+    // Store the message content and clear the input field immediately to prevent double-sending
+    const messageContent = newMessage.trim();
+    setNewMessage('');
     
     try {
       const token = localStorage.getItem('token');
@@ -288,7 +462,7 @@ const MessageDisplay = ({ userId }) => {
       // Prepare message data
       const messageData = {
         receiver_id: selectedConversation.other_participant.id,
-        content: newMessage.trim(),
+        content: messageContent,
         conversation_id: selectedConversation._id
       };
       
@@ -297,7 +471,7 @@ const MessageDisplay = ({ userId }) => {
         _id: `temp-${Date.now()}`,
         sender_id: userId,
         receiver_id: selectedConversation.other_participant.id,
-        content: newMessage.trim(),
+        content: messageContent,
         created_at: new Date().toISOString(),
         read: false,
         pending: true // Mark as pending until confirmed by server
@@ -315,7 +489,7 @@ const MessageDisplay = ({ userId }) => {
         // Create FormData for file upload
         const formData = new FormData();
         formData.append('receiver_id', selectedConversation.other_participant.id);
-        formData.append('content', newMessage.trim());
+        formData.append('content', messageContent);
         formData.append('conversation_id', selectedConversation._id);
         
         // Append each attachment
@@ -341,20 +515,30 @@ const MessageDisplay = ({ userId }) => {
       }
       
       if (response.data && response.data.status === 'success') {
-        // Clear input and attachments
-        setNewMessage('');
+        // Clear attachments (input already cleared at the start of the function)
         setAttachments([]);
         
         // Update conversation with new message
-        updateConversationWithNewMessage(messageData.content);
+        updateConversationWithNewMessage(messageContent);
         
         // Replace the temporary message with the confirmed one from the server
         if (response.data.data) {
-          setMessages(prevMessages => 
-            prevMessages.map(msg => 
-              msg._id === tempMessage._id ? { ...response.data.data, pending: false } : msg
-            )
-          );
+          setMessages(prevMessages => {
+            // Check if the message is already in the list (excluding the temp message)
+            const existingMessages = prevMessages.filter(msg => msg._id !== tempMessage._id);
+            const serverMessage = response.data.data;
+            
+            // Check if this is a duplicate of an existing message
+            if (isDuplicateMessage(serverMessage, existingMessages)) {
+              // Remove the temp message and don't add the server one
+              return existingMessages;
+            }
+            
+            // Replace the temp message with the server one
+            return prevMessages.map(msg => 
+              msg._id === tempMessage._id ? { ...serverMessage, pending: false } : msg
+            );
+          });
         }
         
         // If the conversation was just created, refresh conversations list
@@ -416,6 +600,16 @@ const MessageDisplay = ({ userId }) => {
     }
   };
   
+  // Check if a message is a duplicate
+  const isDuplicateMessage = (newMsg, existingMessages) => {
+    return existingMessages.some(msg => 
+      msg._id === newMsg._id || 
+      (msg.content === newMsg.content && 
+       msg.sender_id === newMsg.sender_id && 
+       Math.abs(new Date(msg.created_at) - new Date(newMsg.created_at)) < 5000)
+    );
+  };
+  
   // Generate color from string
   const stringToColor = (string) => {
     if (!string) return '#6573c3'; // Default color
@@ -471,7 +665,7 @@ const MessageDisplay = ({ userId }) => {
           {conversations.length === 0 ? (
             <Box sx={{ p: 3, textAlign: 'center' }}>
               <ChatBubbleOutlineIcon sx={{ fontSize: 40, color: 'text.secondary', mb: 1 }} />
-              <Typography variant="body2" color="text.secondary">
+              <Typography variant="body2" color="text.secondary" component="div">
                 No conversations yet. Start chatting with users from the Marketplace, Lost & Found, or Ride Share pages.
               </Typography>
             </Box>
@@ -484,11 +678,29 @@ const MessageDisplay = ({ userId }) => {
                 onClick={() => handleSelectConversation(conversation)}
                 sx={{ 
                   borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-                  bgcolor: selectedConversation?._id === conversation._id ? 'rgba(0, 0, 0, 0.04)' : 'transparent',
+                  bgcolor: selectedConversation?._id === conversation._id ? 'rgba(0, 0, 0, 0.04)' : 
+                          conversation.unread ? 'rgba(25, 118, 210, 0.08)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(0, 0, 0, 0.08)'
-                  }
+                  },
+                  fontWeight: conversation.unread ? 'bold' : 'normal',
+                  display: 'flex',
+                  justifyContent: 'space-between'
                 }}
+                secondaryAction={
+                  <IconButton
+                    edge="end"
+                    aria-label="delete"
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent triggering the ListItem click
+                      openDeleteDialog(conversation);
+                    }}
+                    size="small"
+                    color="error"
+                  >
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                }
               >
                 <ListItemAvatar>
                   <Avatar 
@@ -501,45 +713,59 @@ const MessageDisplay = ({ userId }) => {
                     {conversation.other_participant?.name?.charAt(0).toUpperCase() || <PersonIcon />}
                   </Avatar>
                 </ListItemAvatar>
-                <ListItemText
-                  primary={
+                <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 }}>
+                  {/* Primary content */}
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Typography 
                       variant="subtitle1" 
+                      component="span"
                       sx={{ 
-                        fontWeight: 'medium', 
-                        display: 'flex', 
-                        justifyContent: 'space-between',
-                        alignItems: 'center'
-                      }}
-                    >
-                      <span style={{ 
+                        fontWeight: conversation.unread ? 'bold' : 'medium',
                         maxWidth: '70%', 
                         overflow: 'hidden', 
                         textOverflow: 'ellipsis', 
-                        whiteSpace: 'nowrap' 
-                      }}>
-                        {conversation.other_participant?.name || 'Unknown User'}
-                      </span>
-                      <Typography variant="caption" color="text.secondary">
-                        {formatTimestamp(conversation.last_message_time)}
-                      </Typography>
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {conversation.other_participant?.name || 'Unknown User'}
                     </Typography>
-                  }
-                  secondary={
+                    <Typography variant="caption" color="text.secondary" component="span">
+                      {formatTimestamp(conversation.last_message_time)}
+                    </Typography>
+                  </Box>
+                  
+                  {/* Secondary content */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
                     <Typography 
                       variant="body2" 
-                      color="text.secondary"
+                      component="span"
                       sx={{ 
+                        color: conversation.unread ? 'primary.main' : 'text.secondary',
+                        fontWeight: conversation.unread ? 'medium' : 'normal',
+                        flex: 1,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        maxWidth: '100%'
+                        mr: 1
                       }}
                     >
                       {conversation.last_message || 'No messages yet'}
                     </Typography>
-                  }
-                />
+                    {conversation.unread && (
+                      <Box
+                        component="span"
+                        sx={{
+                          display: 'inline-block',
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          bgcolor: 'primary.main',
+                          flexShrink: 0
+                        }}
+                      />
+                    )}
+                  </Box>
+                </Box>
               </ListItem>
             ))
           )}
@@ -578,7 +804,7 @@ const MessageDisplay = ({ userId }) => {
                 {selectedConversation.other_participant?.name?.charAt(0).toUpperCase() || <PersonIcon />}
               </Avatar>
               <Box sx={{ flexGrow: 1 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'medium', color: '#9c27b0' }}>
                   {selectedConversation.other_participant?.name || 'Unknown User'}
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -609,14 +835,17 @@ const MessageDisplay = ({ userId }) => {
                   p: 3
                 }}>
                   <ChatBubbleOutlineIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-                  <Typography variant="h6" color="text.secondary">No messages yet</Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
+                  <Typography variant="h6" color="text.secondary" component="div">No messages yet</Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }} component="div">
                     Start the conversation by sending a message below.
                   </Typography>
                 </Box>
               ) : (
                 messages.map((message, index) => {
                   const isCurrentUser = message.sender_id === userId;
+                  // Get the sender name - if it's the current user, use "You", otherwise use the other participant's name
+                  const senderName = isCurrentUser ? "You" : selectedConversation.other_participant?.name || "Unknown User";
+                  // This ensures we display the correct name for each message sender
                   const showDate = index === 0 || 
                     new Date(message.created_at).toDateString() !== 
                     new Date(messages[index - 1].created_at).toDateString();
@@ -654,32 +883,107 @@ const MessageDisplay = ({ userId }) => {
                             alignItems: 'flex-end'
                           }}
                         >
-                          {!isCurrentUser && (
-                            <Avatar 
-                              sx={{ 
-                                width: 32, 
-                                height: 32, 
-                                mr: 1,
-                                bgcolor: stringToColor(selectedConversation.other_participant?.name)
-                              }}
-                            >
-                              {selectedConversation.other_participant?.name?.charAt(0).toUpperCase() || <PersonIcon />}
-                            </Avatar>
+                                  {!isCurrentUser && (
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mr: 1 }}>
+                              <Avatar 
+                                sx={{ 
+                                  width: 32, 
+                                  height: 32, 
+                                  mb: 0.5,
+                                  bgcolor: stringToColor(selectedConversation.other_participant?.name)
+                                }}
+                              >
+                                {selectedConversation.other_participant?.name?.charAt(0).toUpperCase() || <PersonIcon />}
+                              </Avatar>
+                              <Typography variant="caption" sx={{ fontSize: '0.65rem', fontWeight: 'medium', color: '#9c27b0' }}>
+                                {selectedConversation.other_participant?.name?.split(' ')[0] || 'User'}
+                              </Typography>
+                            </Box>
                           )}
                           
                           <Box 
                             sx={{ 
-                              bgcolor: isCurrentUser ? 'primary.main' : 'background.paper',
-                              color: isCurrentUser ? 'primary.contrastText' : 'text.primary',
-                              borderRadius: 2,
+                              // Sender (other user) messages are purple and on the left
+                              // Receiver (current user) messages are blue and on the right
+                              bgcolor: isCurrentUser ? '#1976d2' : '#9c27b0',
+                              color: 'white',
+                              borderRadius: isCurrentUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
                               p: 1.5,
                               boxShadow: '0px 1px 3px rgba(0, 0, 0, 0.1)',
                               position: 'relative',
-                              opacity: message.pending ? 0.7 : 1
+                              opacity: message.pending ? 0.7 : 1,
+                              border: message.item_id ? '2px solid #ffeb3b' : 'none'
                             }}
                           >
+                            {/* If this is a one-time contact message (has item_id), show a special header */}
+                            {message.item_id && (
+                              <Box sx={{ 
+                                mb: 1, 
+                                pb: 1, 
+                                borderBottom: '1px dashed rgba(255,255,255,0.5)',
+                                bgcolor: 'rgba(255, 235, 59, 0.15)',
+                                borderRadius: '8px',
+                                p: 1
+                              }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                                  {message.item_type === 'marketplace' ? <ShoppingBagIcon fontSize="small" sx={{ mr: 0.5, color: '#ffeb3b' }} /> : 
+                                   message.item_type === 'ride' ? <DirectionsCarIcon fontSize="small" sx={{ mr: 0.5, color: '#ffeb3b' }} /> : 
+                                   message.item_type === 'lost' ? <SearchIcon fontSize="small" sx={{ mr: 0.5, color: '#ffeb3b' }} /> : 
+                                   message.item_type === 'found' ? <FindInPageIcon fontSize="small" sx={{ mr: 0.5, color: '#ffeb3b' }} /> : 
+                                   <InfoIcon fontSize="small" sx={{ mr: 0.5, color: '#ffeb3b' }} />}
+                                  <Typography variant="caption" component="div" sx={{ fontWeight: 'bold' }}>
+                                    {message.item_type === 'marketplace' ? 'Marketplace: ' : 
+                                     message.item_type === 'ride' ? 'Ride Share: ' : 
+                                     message.item_type === 'lost' ? 'Lost Item: ' : 
+                                     message.item_type === 'found' ? 'Found Item: ' : 'Item: '}
+                                    <span style={{ color: '#ffeb3b' }}>{message.item_title || 'Untitled Item'}</span>
+                                  </Typography>
+                                </Box>
+                                {/* Add a link to view the item if available */}
+                                {message.item_id && (
+                                  <Box sx={{ mt: 1, display: 'flex', justifyContent: 'center' }}>
+                                    <Button 
+                                      variant="outlined" 
+                                      size="small" 
+                                      sx={{ 
+                                        color: 'white', 
+                                        borderColor: 'rgba(255,255,255,0.5)',
+                                        fontSize: '0.7rem',
+                                        '&:hover': {
+                                          borderColor: 'white',
+                                          backgroundColor: 'rgba(255,255,255,0.1)'
+                                        }
+                                      }}
+                                      onClick={() => {
+                                        // Format the URL correctly based on item type
+                                        let url = '/';
+                                        if (message.item_type === 'marketplace') {
+                                          url = `/marketplace?item=${message.item_id}`;
+                                        } else if (message.item_type === 'ride') {
+                                          url = `/ride-booking?ride=${message.item_id}`;
+                                        } else if (message.item_type === 'lost' || message.item_type === 'found') {
+                                          url = `/lost-found?item=${message.item_id}`;
+                                        } else {
+                                          // Default fallback - just go to the appropriate section
+                                          if (message.item_type) {
+                                            url = `/${message.item_type}`;
+                                          }
+                                        }
+                                        window.open(url, '_blank');
+                                      }}
+                                    >
+                                      View {message.item_type === 'marketplace' ? 'Item' : 
+                                            message.item_type === 'ride' ? 'Ride' : 
+                                            message.item_type === 'lost' ? 'Lost Item' : 
+                                            message.item_type === 'found' ? 'Found Item' : 'Item'}
+                                    </Button>
+                                  </Box>
+                                )}
+                              </Box>
+                            )}
+                            
                             {message.content && (
-                              <Typography variant="body1">{message.content}</Typography>
+                              <Typography variant="body1" component="div">{message.content}</Typography>
                             )}
                             
                             {message.image_url && (
@@ -845,8 +1149,8 @@ const MessageDisplay = ({ userId }) => {
             bgcolor: 'rgba(0, 0, 0, 0.02)'
           }}>
             <ChatBubbleOutlineIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary">No conversation selected</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
+            <Typography variant="h6" color="text.secondary" component="div">No conversation selected</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }} component="div">
               Select a conversation from the list or start a new one by contacting users from the Marketplace, Lost & Found, or Ride Share pages.
             </Typography>
           </Box>
@@ -858,12 +1162,87 @@ const MessageDisplay = ({ userId }) => {
         open={snackbarOpen}
         autoHideDuration={6000}
         onClose={handleSnackbarClose}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
         <Alert onClose={handleSnackbarClose} severity={snackbarSeverity} sx={{ width: '100%' }}>
           {snackbarMessage}
         </Alert>
       </Snackbar>
+      
+      {/* Custom Delete Confirmation Dialog */}
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={closeDeleteDialog}
+        PaperProps={{
+          sx: {
+            borderRadius: '16px',
+            padding: '8px',
+            maxWidth: '400px',
+            width: '100%'
+          }
+        }}
+      >
+        <Box sx={{ 
+          p: 3, 
+          textAlign: 'center',
+          background: 'linear-gradient(to right, #ff9a9e, #fad0c4)',
+          borderRadius: '8px 8px 0 0',
+          color: 'white'
+        }}>
+          <CloseIcon sx={{ fontSize: 50, mb: 1, color: 'white' }} />
+          <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 1 }}>
+            Delete Conversation
+          </Typography>
+        </Box>
+        
+        <DialogContent sx={{ p: 3, textAlign: 'center' }}>
+          <Typography variant="body1" component="div" sx={{ mb: 2 }}>
+            Are you sure you want to delete your conversation with
+            <Typography component="span" sx={{ fontWeight: 'bold', color: '#9c27b0', mx: 1 }}>
+              {conversationToDelete?.other_participant?.name || 'this user'}
+            </Typography>?
+          </Typography>
+          
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            This will permanently delete all messages between you and this user. This action cannot be undone.
+          </Typography>
+          
+          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 2 }}>
+            <Button 
+              variant="outlined" 
+              onClick={closeDeleteDialog}
+              sx={{ 
+                borderRadius: '20px', 
+                px: 3,
+                borderColor: '#9e9e9e',
+                color: '#9e9e9e',
+                '&:hover': {
+                  borderColor: '#757575',
+                  backgroundColor: 'rgba(0,0,0,0.04)'
+                }
+              }}
+            >
+              Cancel
+            </Button>
+            <Button 
+              variant="contained" 
+              color="error" 
+              onClick={handleDeleteConversation}
+              sx={{ 
+                borderRadius: '20px', 
+                px: 3,
+                background: 'linear-gradient(45deg, #ff5252, #ff1744)',
+                boxShadow: '0 4px 8px rgba(255, 23, 68, 0.3)',
+                '&:hover': {
+                  background: 'linear-gradient(45deg, #ff1744, #d50000)',
+                  boxShadow: '0 6px 10px rgba(255, 23, 68, 0.4)'
+                }
+              }}
+            >
+              Delete Conversation
+            </Button>
+          </Box>
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 };

@@ -72,6 +72,9 @@ def create_message(current_user):
                 'sender_name': sender_name,
                 'content': data.get('content', ''),
                 'image_url': image_url,
+                'item_id': data.get('item_id'),
+                'item_type': data.get('item_type'),
+                'item_title': data.get('item_title'),
                 'created_at': datetime.utcnow().isoformat(),
                 'read': False
             }
@@ -143,6 +146,87 @@ def get_conversations(current_user):
         return jsonify(conversations), 200
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@message_bp.route('/conversations/with/<user_id>', methods=['GET'])
+@token_required
+def get_conversations_with_user(current_user, user_id):
+    try:
+        current_user_id = str(current_user['_id'])
+        
+        # Find conversations between the current user and the specified user
+        conversation = db.conversations.find_one({
+            "$or": [
+                {
+                    "participant1_id": ObjectId(current_user_id),
+                    "participant2_id": ObjectId(user_id)
+                },
+                {
+                    "participant1_id": ObjectId(user_id),
+                    "participant2_id": ObjectId(current_user_id)
+                }
+            ]
+        })
+        
+        # If no conversation exists, return an empty array
+        if not conversation:
+            return jsonify([]), 200
+        
+        # Format the conversation for the response
+        conversation_id = str(conversation['_id'])
+        
+        # Get the other user's details
+        other_user = None
+        if str(conversation['participant1_id']) == current_user_id:
+            other_user_id = str(conversation['participant2_id'])
+        else:
+            other_user_id = str(conversation['participant1_id'])
+            
+        # Get user details
+        other_user = db.users.find_one({"_id": ObjectId(other_user_id)})
+        
+        # Get the last message
+        last_message = db.messages.find_one(
+            {
+                "$or": [
+                    {
+                        "sender_id": ObjectId(current_user_id),
+                        "receiver_id": ObjectId(other_user_id)
+                    },
+                    {
+                        "sender_id": ObjectId(other_user_id),
+                        "receiver_id": ObjectId(current_user_id)
+                    }
+                ]
+            },
+            sort=[('created_at', -1)]
+        )
+        
+        # Format the conversation
+        formatted_conversation = {
+            "_id": conversation_id,
+            "other_participant": {
+                "id": other_user_id,
+                "name": f"{other_user.get('first_name', '')} {other_user.get('last_name', '')}".strip() or other_user.get('email', 'Unknown User'),
+                "email": other_user.get('email', ''),
+                "profile_image": other_user.get('profile_image', '')
+            },
+            "last_message": {
+                "content": last_message.get('content', '') if last_message else '',
+                "sender_id": str(last_message.get('sender_id', '')) if last_message else '',
+                "created_at": last_message.get('created_at', datetime.utcnow()).isoformat() if last_message else datetime.utcnow().isoformat(),
+                "read": last_message.get('read', True) if last_message else True
+            },
+            "unread_count": db.messages.count_documents({
+                "conversation_id": ObjectId(conversation_id),
+                "receiver_id": ObjectId(current_user_id),
+                "read": False
+            })
+        }
+        
+        return jsonify([formatted_conversation]), 200
+    except Exception as e:
+        current_app.logger.error(f"Error in get_conversations_with_user: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @message_bp.route('/conversation/<receiver_id>', methods=['GET'])
@@ -257,45 +341,100 @@ def mark_conversation_as_read(current_user, conversation_id):
     try:
         user_id = str(current_user['_id'])
         
-        # Find the conversation
-        try:
-            conv_obj_id = ObjectId(conversation_id)
-            conversation = db.conversations.find_one({
-                "_id": conv_obj_id,
-                "$or": [
-                    {"participant1_id": ObjectId(user_id)},
-                    {"participant2_id": ObjectId(user_id)}
-                ]
-            })
-            
-            if not conversation:
-                return jsonify({
-                    'status': 'error',
-                    'message': 'Conversation not found'
-                }), 404
-                
-            # Get the other participant
-            other_id = str(conversation["participant2_id"]) if conversation["participant1_id"] == ObjectId(user_id) else str(conversation["participant1_id"])
-            
-            # Mark all messages from the other user as read
-            result = db.messages.update_many(
+        # Get the other participant
+        conversation = db.conversations.find_one({
+            "_id": ObjectId(conversation_id),
+            "$or": [
+                {"participant1_id": ObjectId(user_id)},
+                {"participant2_id": ObjectId(user_id)}
+            ]
+        })
+        
+        if not conversation:
+            return jsonify({
+                'status': 'error',
+                'message': 'Conversation not found or unauthorized'
+            }), 404
+        
+        # Get the other participant
+        if str(conversation["participant1_id"]) == user_id:
+            other_id = str(conversation["participant2_id"])
+        else:
+            other_id = str(conversation["participant1_id"])
+        
+        # Mark messages as read
+        count = Message.mark_conversation_read(user_id, other_id)
+        
+        # Emit socket event to notify the sender
+        socketio.emit('conversation_read', {
+            'conversation_id': conversation_id,
+            'reader_id': user_id
+        }, room=other_id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'{count} messages marked as read'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@message_bp.route('/conversations/<conversation_id>', methods=['DELETE'])
+@token_required
+def delete_conversation(current_user, conversation_id):
+    """Delete a conversation and all its messages"""
+    try:
+        user_id = str(current_user['_id'])
+        
+        # Get the conversation to verify ownership
+        conversation = db.conversations.find_one({
+            "_id": ObjectId(conversation_id),
+            "$or": [
+                {"participant1_id": ObjectId(user_id)},
+                {"participant2_id": ObjectId(user_id)}
+            ]
+        })
+        
+        if not conversation:
+            return jsonify({
+                'status': 'error',
+                'message': 'Conversation not found or unauthorized'
+            }), 404
+        
+        # Get the other participant
+        if str(conversation["participant1_id"]) == user_id:
+            other_id = str(conversation["participant2_id"])
+        else:
+            other_id = str(conversation["participant1_id"])
+        
+        # Delete all messages between these users
+        # Note: In a real production app, you might want to soft-delete or archive instead
+        result = db.messages.delete_many({
+            "$or": [
+                {
+                    "sender_id": ObjectId(user_id),
+                    "receiver_id": ObjectId(other_id)
+                },
                 {
                     "sender_id": ObjectId(other_id),
-                    "receiver_id": ObjectId(user_id),
-                    "read": False
-                },
-                {"$set": {"read": True}}
-            )
-            
-            return jsonify({
-                'status': 'success',
-                'message': 'All messages marked as read',
-                'count': result.modified_count
-            }), 200
-            
-        except Exception as e:
-            current_app.logger.error(f"Error processing conversation: {str(e)}")
-            return jsonify({'error': str(e)}), 500
+                    "receiver_id": ObjectId(user_id)
+                }
+            ]
+        })
+        
+        # Delete the conversation
+        db.conversations.delete_one({"_id": ObjectId(conversation_id)})
+        
+        # Notify the other user via socket that the conversation was deleted
+        socketio.emit('conversation_deleted', {
+            'conversation_id': conversation_id,
+            'deleter_id': user_id
+        }, room=other_id)
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Conversation and {result.deleted_count} messages deleted successfully'
+        }), 200
         
     except Exception as e:
         current_app.logger.error(f"Error in mark_conversation_as_read: {str(e)}")

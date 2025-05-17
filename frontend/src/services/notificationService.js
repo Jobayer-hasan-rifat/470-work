@@ -85,11 +85,14 @@ const notificationService = {
   },
 
   // Get announcements for a specific page
-  getPageAnnouncements: async (page) => {
+  getPageAnnouncements: async (page, cacheBuster = '') => {
     try {
       // This is a public endpoint, no auth headers needed
       const response = await axios.get(
-        `${API_URL}/announcements/page/${page}`
+        `${API_URL}/announcements/page/${page}${cacheBuster}`,
+        {
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        }
       );
       return response.data;
     } catch (error) {
@@ -98,11 +101,16 @@ const notificationService = {
   },
 
   // Get all announcements (admin only)
-  getAllAnnouncements: async () => {
+  getAllAnnouncements: async (cacheBuster = '') => {
     try {
+      const headers = getAuthHeaders();
+      // Add cache control headers to prevent browser caching
+      headers.headers['Cache-Control'] = 'no-cache';
+      headers.headers['Pragma'] = 'no-cache';
+      
       const response = await axios.get(
-        `${API_URL}/admin/announcements`,
-        getAuthHeaders()
+        `${API_URL}/admin/announcements${cacheBuster}`,
+        headers
       );
       return response.data;
     } catch (error) {
@@ -117,6 +125,17 @@ const notificationService = {
         `${API_URL}/admin/announcements/${announcementId}`,
         getAuthHeaders()
       );
+      
+      // Clear any cached announcements to ensure fresh data on next fetch
+      localStorage.removeItem('cached_announcements');
+      localStorage.removeItem('cached_announcements_timestamp');
+      
+      // For each page type, clear the specific page cache
+      ['home', 'ride_share', 'lost_found', 'marketplace'].forEach(page => {
+        localStorage.removeItem(`cached_page_announcements_${page}`);
+        localStorage.removeItem(`cached_page_announcements_${page}_timestamp`);
+      });
+      
       return response.data;
     } catch (error) {
       handleApiError(error);

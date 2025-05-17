@@ -20,30 +20,47 @@ auth_bp = Blueprint('auth_bp', __name__)
 user_model = User(None)  # Will be initialized properly when used with the correct database
 
 @auth_bp.route('/me', methods=['GET'])
-@jwt_required()
+@jwt_required(optional=True)
 def get_current_user():
     try:
         # Get the identity from the JWT token
         current_user_id = get_jwt_identity()
         
+        # If no user is authenticated, return empty response with 200 status
+        if not current_user_id:
+            return jsonify({'authenticated': False}), 200
+        
         # Initialize the user model with the current app's database
         from ..db import get_db
         db = get_db()
-        user_model.db = db
         
-        # Find the user by ID
-        user = user_model.find_by_id(current_user_id)
+        # Find the user by ID - handle both ObjectId and email formats
+        user = None
+        try:
+            # Try to find by ObjectId
+            from bson.objectid import ObjectId
+            user = db.users.find_one({"_id": ObjectId(current_user_id)})
+        except:
+            # If not a valid ObjectId, try as email or username
+            user = db.users.find_one({"email": current_user_id})
+            if not user:
+                user = db.users.find_one({"username": current_user_id})
         
         if not user:
-            return jsonify({'error': 'User not found'}), 404
+            return jsonify({'error': 'User not found', 'authenticated': False}), 200
         
         # Remove sensitive information
         user.pop('password', None)
         
-        return jsonify(user), 200
+        # Convert ObjectId to string for JSON serialization
+        if '_id' in user and not isinstance(user['_id'], str):
+            user['_id'] = str(user['_id'])
+        
+        return jsonify({'user': user, 'authenticated': True}), 200
     except Exception as e:
         current_app.logger.error(f"Error getting current user: {str(e)}")
-        return jsonify({'error': 'Failed to get user information'}), 500
+        # Return a 200 response even on error to prevent frontend crashes
+        return jsonify({'error': 'Failed to get user information', 'authenticated': False}), 200
 
 # Secret key for JWT
 JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY', 'your-secret-key')

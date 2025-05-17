@@ -152,8 +152,13 @@ def get_items_by_user(user_id):
 @limiter.limit("60 per minute")
 def get_item(item_id):
     try:
-        # Get the item from the database
-        item = db.marketplace_items.find_one({'_id': ObjectId(item_id)})
+        # Get the item from the database - safely handle ObjectId conversion
+        try:
+            item = db.marketplace_items.find_one({'_id': ObjectId(item_id)})
+        except:
+            # Try to find by string ID if ObjectId conversion fails
+            item = db.marketplace_items.find_one({'_id': item_id})
+            
         if not item:
             return jsonify({'error': 'Item not found'}), 404
         
@@ -189,27 +194,54 @@ def update_item(item_id):
         # Get item data from request
         data = request.form.to_dict() if request.form else request.get_json()
         
-        # Get the item from the database
-        item = db.marketplace_items.find_one({'_id': ObjectId(item_id)})
+        # Get the item from the database - safely handle ObjectId conversion
+        try:
+            item = db.marketplace_items.find_one({'_id': ObjectId(item_id)})
+        except:
+            # Try to find by string ID if ObjectId conversion fails
+            item = db.marketplace_items.find_one({'_id': item_id})
+            
         if not item:
             return jsonify({'error': 'Item not found'}), 404
         
         # Check if user is hardcoded admin
         is_hardcoded_admin = current_user_id == "admin"
         
+        # Helper function to safely handle ObjectId conversion
+        def get_user_by_id(user_id):
+            try:
+                # Try to find user by ObjectId
+                return db.users.find_one({'_id': ObjectId(user_id)})
+            except:
+                # If not a valid ObjectId, try to find by email
+                return db.users.find_one({'email': user_id})
+        
         # If not hardcoded admin, check database
         if not is_hardcoded_admin:
-            current_user = db.users.find_one({'_id': ObjectId(current_user_id)})
+            current_user = get_user_by_id(current_user_id)
             if not current_user:
                 return jsonify({'error': 'User not found'}), 404
             is_admin = current_user.get('role') == 'admin'
         else:
             is_admin = True
             
-        is_owner = str(item['user_id']) == current_user_id
+        # Check if the current user is the owner of the item
+        # Handle different formats of user_id (ObjectId, string, email)
+        try:
+            is_owner = str(item['user_id']) == current_user_id
+            if not is_owner:
+                # Also check if user_id might be stored as email
+                user_by_email = db.users.find_one({'email': current_user_id})
+                if user_by_email:
+                    is_owner = str(item['user_id']) == str(user_by_email['_id'])
+        except:
+            is_owner = False
         
-        # Allow update if user owns the item or is admin
+        # For admin panel, always allow admins to edit/delete
+        # For regular users, only allow if they own the item
         if not is_owner and not is_admin:
+            # Log the details for debugging
+            current_app.logger.info(f"Auth failed: user_id={current_user_id}, item.user_id={item.get('user_id')}, is_admin={is_admin}")
             return jsonify({'error': 'Unauthorized to update this item'}), 403
         
         # Update item data
@@ -293,16 +325,35 @@ def delete_item(item_id):
         # Check if user is hardcoded admin
         is_hardcoded_admin = current_user_id == "admin"
         
+        # Helper function to safely handle ObjectId conversion
+        def get_user_by_id(user_id):
+            try:
+                # Try to find user by ObjectId
+                return db.users.find_one({'_id': ObjectId(user_id)})
+            except:
+                # If not a valid ObjectId, try to find by email
+                return db.users.find_one({'email': user_id})
+        
         # If not hardcoded admin, check database
         if not is_hardcoded_admin:
-            current_user = db.users.find_one({'_id': ObjectId(current_user_id)})
+            current_user = get_user_by_id(current_user_id)
             if not current_user:
                 return jsonify({'error': 'User not found'}), 404
             is_admin = current_user.get('role') == 'admin'
         else:
             is_admin = True
             
-        is_owner = str(item['user_id']) == current_user_id
+        # Check if the current user is the owner of the item
+        # Handle different formats of user_id (ObjectId, string, email)
+        try:
+            is_owner = str(item['user_id']) == current_user_id
+            if not is_owner:
+                # Also check if user_id might be stored as email
+                user_by_email = db.users.find_one({'email': current_user_id})
+                if user_by_email:
+                    is_owner = str(item['user_id']) == str(user_by_email['_id'])
+        except:
+            is_owner = False
         
         # Allow deletion if user owns the item or is admin
         if not is_owner and not is_admin:

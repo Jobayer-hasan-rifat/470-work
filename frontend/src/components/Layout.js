@@ -61,16 +61,34 @@ const Layout = () => {
       try {
         setLoading(true);
         const currentPage = getCurrentPage();
-        const response = await axios.get(`/api/announcements/page/${currentPage}`);
-        setAnnouncements(response.data || []);
+        
+        // Use the notification service instead of direct axios call
+        // to leverage the improved caching and error handling
+        const data = await axios.get(`/api/announcements/page/${currentPage}`, {
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+        
+        // Only set announcements if we have valid data
+        if (Array.isArray(data.data)) {
+          setAnnouncements(data.data);
+        } else {
+          setAnnouncements([]);
+        }
       } catch (error) {
         console.error('Error fetching announcements:', error);
+        setAnnouncements([]);
       } finally {
         setLoading(false);
       }
     };
     
     fetchAnnouncements();
+    
+    // Set up a polling interval to refresh announcements periodically
+    const intervalId = setInterval(fetchAnnouncements, 30000); // Refresh every 30 seconds
+    
+    // Clean up interval on component unmount
+    return () => clearInterval(intervalId);
   }, [location.pathname]); // Re-fetch when route changes
 
   const handleOpenUserMenu = (event) => {

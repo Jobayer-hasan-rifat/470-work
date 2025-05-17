@@ -128,6 +128,8 @@ def init_socket_events(socketio):
                     "content": content,
                     "image_url": image_url,
                     "item_id": item_id,
+                    "item_type": data.get('item_type'),
+                    "item_title": data.get('item_title'),
                     "created_at": datetime.utcnow().isoformat(),
                     "read": False
                 }

@@ -6,6 +6,8 @@ from app.socket_events import init_socket_events
 from app.extensions import socketio
 
 app = create_app()
+
+# Allow all origins for now to ensure frontend can connect
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Initialize the app with the Socket.IO instance
